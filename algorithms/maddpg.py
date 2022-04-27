@@ -190,7 +190,7 @@ class MADDPG(object):
         curr_agent.policy_optimizer.step()
         if logger is not None:
             logger.add_scalars(
-                "agent%i/losses" % agent_i,
+                f"agent_{agent_i}/losses",
                 {"vf_loss": vf_loss, "pol_loss": pol_loss},
                 self.niter,
             )

@@ -9,10 +9,8 @@ import numpy as np
 from gym.spaces import Box, Discrete
 from pathlib import Path
 
-# from torch.autograd import Variable
 from torch.utils.tensorboard import SummaryWriter
 
-# from utils.make_env import make_env
 from utils.buffer import ReplayBuffer
 from algorithms.maddpg import MADDPG
 
@@ -21,12 +19,14 @@ from pettingzoo import mpe
 from supersuit import stable_baselines3_vec_env_v0
 from supersuit import gym_vec_env_v0
 from supersuit import pettingzoo_env_to_vec_env_v1
+from supersuit import clip_actions_v0
 
 USE_CUDA = False  # torch.cuda.is_available()
 
 
 def make_env(env_id, n_rollout_threads, seed, discrete_action=False):
-    # A clusre dance (for some reason to init)
+    # Ugly:
+    # A closure dance (for some reason) to init the env
     Env = getattr(mpe, env_id)
 
     def get_env_fn(rank):
@@ -49,7 +49,19 @@ def make_env(env_id, n_rollout_threads, seed, discrete_action=False):
 
 
 def run(config):
+    # --- Seeds etc
+    torch.manual_seed(config.seed)
+    np.random.seed(config.seed)
+    if not USE_CUDA:
+        torch.set_num_threads(config.n_training_threads)
+
+    # --- Setup log paths.
+    #
+    # Do not delete data, but add INT suffixs ala,
+    #
+    # ./models/env_id/model_name/run_INT
     model_dir = Path("./models") / config.env_id / config.model_name
+
     if not model_dir.exists():
         curr_run = "run1"
     else:
@@ -65,28 +77,23 @@ def run(config):
     run_dir = model_dir / curr_run
     log_dir = run_dir / "logs"
     os.makedirs(log_dir)
+
     logger = SummaryWriter(str(log_dir))
 
-    torch.manual_seed(config.seed)
-    np.random.seed(config.seed)
-    if not USE_CUDA:
-        torch.set_num_threads(config.n_training_threads)
+    # --- Build the env, an MPE zoo
+    # TODO: add env_hparams as an arg
+
     Env = getattr(mpe, config.env_id)
     env = Env.parallel_env(continuous_actions=True)
+    env = clip_actions_v0(env)
     env.reset()
-    # Make access to 'space' info ass expected through the existing codebase
+
+    # Make access to 'space' info in format that is
+    # expected through the codebase
     action_space = [env.action_space(a) for a in env.possible_agents]
     observation_space = [env.observation_space(a) for a in env.possible_agents]
-    print("action_space", action_space)
-    print("observation_space", observation_space)
 
-    # observation_space = [env.observation_space(a) for a in env.possible_agents]
-    # env = gym_vec_env_v0(env, config.n_rollout_threads)
-    # env = make_env(
-    #     config.env_id, config.n_rollout_threads, config.seed, config.discrete_action
-    # )
-    # env = pettingzoo_env_to_vec_env_v1(env)
-    # env = stable_baselines3_vec_env_v0(env, config.n_rollout_threads)
+    # --- Build the model and what it needs to learn (buffers)
     maddpg = MADDPG.init_from_env(
         env,
         agent_alg=config.agent_alg,
@@ -95,21 +102,27 @@ def run(config):
         lr=config.lr,
         hidden_dim=config.hidden_dim,
     )
-    # maddpg = MADDPG()
     replay_buffer = ReplayBuffer(
         config.buffer_length,
         maddpg.nagents,
         [obsp.shape[0] for obsp in observation_space],
         [acsp.shape[0] if isinstance(acsp, Box) else acsp.n for acsp in action_space],
     )
+
+    # ---
+    # RUN loop: run a set of episodes (n_episodes), where each has a
+    # pre-definited duration (episode_length)
     t = 0
     for ep_i in range(0, config.n_episodes, config.n_rollout_threads):
         print(
-            "Episodes %i-%i of %i"
-            % (ep_i + 1, ep_i + 1 + config.n_rollout_threads, config.n_episodes)
+            f"Episodes {ep_i + 1}-{ep_i + 1 + config.n_rollout_threads} of {config.n_episodes}"
         )
+
+        # Reset several things:
+        # - env.
+        # - buffers,
+        # - and the exploration noise (if it was used).
         obs = env.reset()
-        # obs.shape = (n_rollout_threads, nagent)(nobs), nobs differs per agent so not tensor
         maddpg.prep_rollouts(device="cpu")
 
         explr_pct_remaining = (
@@ -121,53 +134,22 @@ def run(config):
         )
         maddpg.reset_noise()
 
+        # --- Rollout loop - we do for a fixed length
         for et_i in range(config.episode_length):
-            # rearrange observations to be per agent, and convert to torch Variable
-            # print(obs)
-            # torch_obs = [
-            #     torch.tensor(np.vstack(obs[:, i]), requires_grad=False)
-            #     for i in range(maddpg.nagents)
-            # ]
-            # torch_obs = [Variable(torch.Tensor(np.vstack(obs[:, i])),
-            #                       requires_grad=False)
-            #              for i in range(maddpg.nagents)]
-            print("----------------------------")
-            print("ei_i", et_i)
-
+            # rearrange observations for maddpg
             torch_obs = [
                 torch.tensor(obs[a], requires_grad=False).unsqueeze(0)
                 for a in env.possible_agents
             ]
-
-            # get actions as torch Variables
+            # Agents act 'at once' (as parallelized AEC)
             torch_agent_actions = maddpg.step(torch_obs, explore=True)
-            print("torch_agent_actions:", torch_agent_actions)
-            # convert actions to numpy arrays
-            agent_actions = [ac.data.numpy() for ac in torch_agent_actions]
-            # rearrange actions to be per environment
-            # actions = [
-            #     [ac[i] for ac in agent_actions] for i in range(config.n_rollout_threads)
-            # ]
-            # next_obs, rewards, dones, infos = env.step(actions)
-            # for i, agent in enumerate(env.agent_iter()):
-            #     action = maddpg.agent[i].step(torch_obs[i])
-            #     action = action.data.numpy()
-            #     actions.append(action)
+            # rearrange actions for zoo environment
             agent_actions = {}
             for a, ac in zip(env.possible_agents, torch_agent_actions):
                 agent_actions[a] = ac.data.numpy().flatten()
 
-            print("obs.keys():", obs.keys())
-            print("obs.shape:", list(obs.values())[0].shape)
-            print("obs:", obs)
-            print("torch_obs:", torch_obs)
-            print("actions[0].shape:", list(agent_actions.values())[0].shape)
-            print("agent_actions:", agent_actions)
+            # !
             next_obs, rewards, dones, infos = env.step(agent_actions)
-            print("dones:", dones)
-            print("rewards:", rewards)
-            print("next_obs:", next_obs)
-
             replay_buffer.push(
                 [obs[a] for a in env.possible_agents],
                 [agent_actions[a] for a in env.possible_agents],
@@ -175,8 +157,25 @@ def run(config):
                 [next_obs[a] for a in env.possible_agents],
                 [dones[a] for a in env.possible_agents],
             )
+
+            # setup for next step
             obs = next_obs
             t += config.n_rollout_threads
+
+            # print("----------------------------")
+            # print("ei_i", et_i)
+            # print("obs.keys():", obs.keys())
+            # print("obs.shape:", list(obs.values())[0].shape)
+            # print("obs:", obs)
+            # print("torch_obs:", torch_obs)
+            # print("actions[0].shape:", list(agent_actions.values())[0].shape)
+            # print("agent_actions:", agent_actions)
+            # print("torch_agent_actions:", torch_agent_actions)
+            # print("dones:", dones)
+            # print("rewards:", rewards)
+            # print("next_obs:", next_obs)
+
+            # train (ugly code)
             if (
                 len(replay_buffer) >= config.batch_size
                 and (t % config.steps_per_update) < config.n_rollout_threads
@@ -193,20 +192,30 @@ def run(config):
                         maddpg.update(sample, a_i, logger=logger)
                     maddpg.update_all_targets()
                 maddpg.prep_rollouts(device="cpu")
+
+        # --- Post-episode LOG....
+        # Data
         ep_rews = replay_buffer.get_average_rewards(
             config.episode_length * config.n_rollout_threads
         )
-        for a_i, a_ep_rew in enumerate(ep_rews):
-            logger.add_scalar("agent%i/mean_episode_rewards" % a_i, a_ep_rew, ep_i)
+        for i, a in enumerate(env.possible_agents):
+            logger.add_scalar(
+                f"agent_{i}/std_episode_actions", replay_buffer.ac_buffs[i].std(), ep_i
+            )
+            logger.add_scalar(
+                f"agent_{i}/std_episode_rewards", replay_buffer.rew_buffs[i].std(), ep_i
+            )
+            logger.add_scalar(f"agent_{i}/mean_episode_rewards", ep_rews[i], ep_i)
 
+        # Models
         if ep_i % config.save_interval < config.n_rollout_threads:
             os.makedirs(run_dir / "incremental", exist_ok=True)
             maddpg.save(run_dir / "incremental" / ("model_ep%i.pt" % (ep_i + 1)))
             maddpg.save(run_dir / "model.pt")
 
+    # --- Cleanup/save/etc are done
     maddpg.save(run_dir / "model.pt")
     env.close()
-    logger.export_scalars_to_json(str(log_dir / "summary.json"))
     logger.close()
 
 
