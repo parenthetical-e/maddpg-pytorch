@@ -11,38 +11,45 @@ for all agents. Each element of the list should be a numpy array,
 of size (env.world.dim_p + env.world.dim_c, 1). Physical actions precede
 communication actions in this array. See environment.py for more details.
 """
+from operator import ge
+from pettingzoo import mpe
 
-def make_env(scenario_name, benchmark=False, discrete_action=False):
-    '''
-    Creates a MultiAgentEnv object as env. This can be used similar to a gym
+
+def make_env(env_id, benchmark=False, env_kwargs=None):
+    """
+    Creates a pettingzoo object as env. This can be used similar to a gym
     environment by calling env.reset() and env.step().
     Use env.render() to view the environment on the screen.
 
     Input:
-        scenario_name   :   name of the scenario from ./scenarios/ to be Returns
-                            (without the .py extension)
+        env_id   :   name of the MPE [pettingzoo] env
         benchmark       :   whether you want to produce benchmarking data
                             (usually only done during evaluation)
-
-    Some useful env properties (see environment.py):
-        .observation_space  :   Returns the observation space for each agent
-        .action_space       :   Returns the action space for each agent
-        .n                  :   Returns the number of Agents
-    '''
-    from multiagent.environment import MultiAgentEnv
-    import multiagent.scenarios as scenarios
-
-    # load scenario from script
-    scenario = scenarios.load(scenario_name + ".py").Scenario()
-    # create world
-    world = scenario.make_world()
-    # create multiagent environment
-    if benchmark:        
-        env = MultiAgentEnv(world, scenario.reset_world, scenario.reward,
-                            scenario.observation, scenario.benchmark_data,
-                            discrete_action=discrete_action)
+    """
+    # from multiagent.environment import MultiAgentEnv
+    # import multiagent.scenarios as scenarios
+    Env = getattr(mpe, env_id)
+    if env_kwargs is not None:
+        env = Env().env()
     else:
-        env = MultiAgentEnv(world, scenario.reset_world, scenario.reward,
-                            scenario.observation,
-                            discrete_action=discrete_action)
+        env = Env(**env_kwargs).env()
+
+    # if benchmark:
+    #     env = MultiAgentEnv(
+    #         world,
+    #         scenario.reset_world,
+    #         scenario.reward,
+    #         scenario.observation,
+    #         scenario.benchmark_data,
+    #         discrete_action=discrete_action,
+    #     )
+    # else:
+    #     env = MultiAgentEnv(
+    #         world,
+    #         scenario.reset_world,
+    #         scenario.reward,
+    #         scenario.observation,
+    #         discrete_action=discrete_action,
+    #     )
+
     return env
