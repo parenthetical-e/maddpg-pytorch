@@ -256,11 +256,19 @@ def run(config):
                 else:
                     maddpg.prep_training(device="cpu")
                 for u_i in range(config.n_rollout_threads):
-                    for a_i in range(maddpg.nagents):
-                        sample = replay_buffer.sample(
-                            config.batch_size, to_gpu=USE_CUDA
-                        )
-                        maddpg.update(sample, a_i, logger=logger)
+                    # When `maddpg` is built it uses the env and
+                    # env.possible_agents to setup itss own agents
+                    # BUT the agents are indexed by ints not keys
+                    # so wee need to loop over all possible but only
+                    # learn from current env.agents. This prevents
+                    # 'overtraining' on stale experiende in dead
+                    # agents who may never the less later revive.
+                    for a_i, a_n in enumerate(env.possible_agents):
+                        if a_n in env.agents:
+                            sample = replay_buffer.sample(
+                                config.batch_size, to_gpu=USE_CUDA
+                            )
+                            maddpg.update(sample, a_i, a_n, logger=logger)
                     maddpg.update_all_targets()
                 maddpg.prep_rollouts(device="cpu")
                 # Intrinsic
@@ -269,27 +277,45 @@ def run(config):
                 else:
                     intrinsic_maddpg.prep_training(device="cpu")
                 for u_i in range(config.n_rollout_threads):
-                    for a_i in range(intrinsic_maddpg.nagents):
-                        sample = intrinsic_replay_buffer.sample(
-                            config.batch_size, to_gpu=USE_CUDA
-                        )
-                        intrinsic_maddpg.update(sample, a_i, logger=logger)
+                    for a_i, a_n in enumerate(env.possible_agents):
+                        if a_n in env.agents:
+                            sample = replay_buffer.sample(
+                                config.batch_size, to_gpu=USE_CUDA
+                            )
+                            intrinsic_maddpg.update(sample, a_i, a_n, logger=logger)
                     intrinsic_maddpg.update_all_targets()
                 intrinsic_maddpg.prep_rollouts(device="cpu")
 
         # --- Post-episode LOG....
         # Data
+        # reward
         ep_rews = replay_buffer.get_average_rewards(
             config.episode_length * config.n_rollout_threads
         )
         for i, a in enumerate(env.possible_agents):
             logger.add_scalar(
-                f"agent_{i}/std_episode_actions", replay_buffer.ac_buffs[i].std(), ep_i
+                f"{a}/std_episode_actions", replay_buffer.ac_buffs[i].std(), ep_i
             )
             logger.add_scalar(
-                f"agent_{i}/std_episode_rewards", replay_buffer.rew_buffs[i].std(), ep_i
+                f"{a}/std_episode_rewards", replay_buffer.rew_buffs[i].std(), ep_i
             )
-            logger.add_scalar(f"agent_{i}/mean_episode_rewards", ep_rews[i], ep_i)
+            logger.add_scalar(f"{a}/mean_episode_rewards", ep_rews[i], ep_i)
+        ep_intrins = replay_buffer.get_average_rewards(
+            config.episode_length * config.n_rollout_threads
+        )
+        # intrinsic
+        for i, a in enumerate(env.possible_agents):
+            logger.add_scalar(
+                f"{a}/std_episode_actions_intrinsic",
+                intrinsic_replay_buffer.ac_buffs[i].std(),
+                ep_i,
+            )
+            logger.add_scalar(
+                f"{a}/std_episode_intrinsic",
+                intrinsic_replay_buffer.rew_buffs[i].std(),
+                ep_i,
+            )
+            logger.add_scalar(f"{a}/mean_episode_intrinsic", ep_intrins[i], ep_i)
 
         # Models
         if ep_i % config.save_interval < config.n_rollout_threads:
