@@ -23,8 +23,6 @@ from supersuit import gym_vec_env_v0
 from supersuit import pettingzoo_env_to_vec_env_v1
 from supersuit import clip_actions_v0
 
-# USE_CUDA = False  # torch.cuda.is_available()
-
 
 def run(config):
     # --- Seeds etc
@@ -63,7 +61,7 @@ def run(config):
     print(f"----- Running: {config.env_id} ------")
     print(f"device: {device}")
     print(f"log_dir: {log_dir}")
-    
+
     # --- Build the env, an MPE zoo
     # TODO: add env_hparams as an arg
 
@@ -180,15 +178,7 @@ def run(config):
                 and (t % config.steps_per_update) < config.n_rollout_threads
             ):
                 maddpg.prep_training(device=device)
-                # if USE_CUDA:
-                #     maddpg.prep_training(device="gpu")
-                # else:
-                #     maddpg.prep_training(device="cpu")
                 for u_i in range(config.n_rollout_threads):
-                    # When `maddpg` is built it uses the env and
-                    # env.possible_agents to setup its own agents
-                    # BUT the agents are indexed by ints not keys
-                    # so we need to loop over all possible.
                     for a_i, a_n in enumerate(env.possible_agents):
                         sample = replay_buffer.sample(config.batch_size, device)
                         maddpg.update(sample, a_i, a_n, logger=logger)

@@ -21,8 +21,6 @@ from supersuit import clip_actions_v0
 
 from infoduel_maddpg.utils.academic_wrappers import StatePrediction
 
-# USE_CUDA = False  # torch.cuda.is_available()
-
 
 def run(config):
     # --- Seeds etc
@@ -276,17 +274,6 @@ def run(config):
             ):
                 # Reward
                 maddpg.prep_training(device=device)
-                # if USE_CUDA:
-                #     maddpg.prep_training(device="gpu")
-                # else:
-                #     maddpg.prep_training(device="cpu")
-                # When `maddpg` is built it uses the env and
-                # env.possible_agents to setup itss own agents
-                # BUT the agents are indexed by ints not keys
-                # so wee need to loop over all possible but only
-                # learn from current env.agents. This prevents
-                # 'overtraining' on stale experiende in dead
-                # agents who may never the less later revive.
                 for u_i in range(config.n_rollout_threads):
                     for a_i, a_n in enumerate(env.possible_agents):
                         sample = replay_buffer.sample(config.batch_size, device)
@@ -295,10 +282,6 @@ def run(config):
                 maddpg.prep_rollouts(device="cpu")
                 # Intrinsic
                 intrinsic_maddpg.prep_training(device=device)
-                # if USE_CUDA:
-                #     intrinsic_maddpg.prep_training(device="gpu")
-                # else:
-                #     intrinsic_maddpg.prep_training(device="cpu")
                 for u_i in range(config.n_rollout_threads):
                     for a_i, a_n in enumerate(env.possible_agents):
                         sample = intrinsic_replay_buffer.sample(

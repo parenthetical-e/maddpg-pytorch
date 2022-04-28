@@ -85,10 +85,6 @@ class ReplayBuffer(object):
     def sample(self, N, device, norm_rews=True):
         inds = np.random.choice(np.arange(self.filled_i), size=N, replace=False)
         cast = lambda x: Variable(Tensor(x), requires_grad=False).to(device)
-        # if to_gpu:
-        #     cast = lambda x: Variable(Tensor(x), requires_grad=False).cuda()
-        # else:
-        #     cast = lambda x: Variable(Tensor(x), requires_grad=False)
         if norm_rews:
             ret_rews = [
                 cast(
