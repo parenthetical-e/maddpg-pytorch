@@ -23,14 +23,16 @@ from supersuit import gym_vec_env_v0
 from supersuit import pettingzoo_env_to_vec_env_v1
 from supersuit import clip_actions_v0
 
-USE_CUDA = False  # torch.cuda.is_available()
+# USE_CUDA = False  # torch.cuda.is_available()
 
 
 def run(config):
     # --- Seeds etc
     torch.manual_seed(config.seed)
     np.random.seed(config.seed)
-    if not USE_CUDA:
+
+    device = get_device(config.device)
+    if device == "cpu":
         torch.set_num_threads(config.n_training_threads)
 
     # --- Setup log paths.
@@ -58,6 +60,10 @@ def run(config):
 
     logger = SummaryWriter(str(log_dir))
 
+    print(f"----- Running: {config.env_id} ------")
+    print(f"device: {device}")
+    print(f"log_dir: {log_dir}")
+    
     # --- Build the env, an MPE zoo
     # TODO: add env_hparams as an arg
 
@@ -86,6 +92,13 @@ def run(config):
         [obsp.shape[0] for obsp in observation_space],
         [acsp.shape[0] if isinstance(acsp, Box) else acsp.n for acsp in action_space],
     )
+
+    # debug
+    # for a, ma in zip(env.possible_agents, maddpg.agents):
+    #     print(f"{a}.policy", ma.policy)
+    #     print(f"{a}.critic", ma.critic)
+    #     print(f"{a}.target_policy", ma.target_policy)
+    #     print(f"{a}.target_critic", ma.target_critic)
 
     # ---
     # RUN loop: run a set of episodes (n_episodes), where each has a
@@ -166,19 +179,18 @@ def run(config):
                 len(replay_buffer) >= config.batch_size
                 and (t % config.steps_per_update) < config.n_rollout_threads
             ):
-                if USE_CUDA:
-                    maddpg.prep_training(device="gpu")
-                else:
-                    maddpg.prep_training(device="cpu")
+                maddpg.prep_training(device=device)
+                # if USE_CUDA:
+                #     maddpg.prep_training(device="gpu")
+                # else:
+                #     maddpg.prep_training(device="cpu")
                 for u_i in range(config.n_rollout_threads):
                     # When `maddpg` is built it uses the env and
                     # env.possible_agents to setup its own agents
                     # BUT the agents are indexed by ints not keys
                     # so we need to loop over all possible.
                     for a_i, a_n in enumerate(env.possible_agents):
-                        sample = replay_buffer.sample(
-                            config.batch_size, to_gpu=USE_CUDA
-                        )
+                        sample = replay_buffer.sample(config.batch_size, device)
                         maddpg.update(sample, a_i, a_n, logger=logger)
                     maddpg.update_all_targets()
                 maddpg.prep_rollouts(device="cpu")
@@ -239,6 +251,7 @@ if __name__ == "__main__":
         "--adversary_alg", default="MADDPG", type=str, choices=["MADDPG", "DDPG"]
     )
     parser.add_argument("--discrete_action", action="store_true")
+    parser.add_argument("--device", help="Set device", default="cpu", type=str)
 
     config = parser.parse_args()
 

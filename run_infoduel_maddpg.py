@@ -11,6 +11,8 @@ from infoduel_maddpg.utils.buffer import ReplayBuffer
 from infoduel_maddpg.core import MADDPG
 
 from stable_baselines3.common.vec_env import SubprocVecEnv, DummyVecEnv
+from stable_baselines3.common.utils import get_device
+
 from pettingzoo import mpe
 from supersuit import stable_baselines3_vec_env_v0
 from supersuit import gym_vec_env_v0
@@ -19,14 +21,16 @@ from supersuit import clip_actions_v0
 
 from infoduel_maddpg.utils.academic_wrappers import StatePrediction
 
-USE_CUDA = False  # torch.cuda.is_available()
+# USE_CUDA = False  # torch.cuda.is_available()
 
 
 def run(config):
     # --- Seeds etc
     torch.manual_seed(config.seed)
     np.random.seed(config.seed)
-    if not USE_CUDA:
+
+    device = get_device(config.device)
+    if device == "cpu":
         torch.set_num_threads(config.n_training_threads)
 
     # --- Setup log paths.
@@ -53,6 +57,10 @@ def run(config):
     os.makedirs(log_dir)
 
     logger = SummaryWriter(str(log_dir))
+
+    print(f"----- Running: {config.env_id} ------")
+    print(f"device: {device}")
+    print(f"log_dir: {log_dir}")
 
     # --- Build the env, an MPE zoo
     # TODO: add env_hparams as an arg
@@ -267,10 +275,11 @@ def run(config):
                 and (t % config.steps_per_update) < config.n_rollout_threads
             ):
                 # Reward
-                if USE_CUDA:
-                    maddpg.prep_training(device="gpu")
-                else:
-                    maddpg.prep_training(device="cpu")
+                maddpg.prep_training(device=device)
+                # if USE_CUDA:
+                #     maddpg.prep_training(device="gpu")
+                # else:
+                #     maddpg.prep_training(device="cpu")
                 # When `maddpg` is built it uses the env and
                 # env.possible_agents to setup itss own agents
                 # BUT the agents are indexed by ints not keys
@@ -280,21 +289,21 @@ def run(config):
                 # agents who may never the less later revive.
                 for u_i in range(config.n_rollout_threads):
                     for a_i, a_n in enumerate(env.possible_agents):
-                        sample = replay_buffer.sample(
-                            config.batch_size, to_gpu=USE_CUDA
-                        )
+                        sample = replay_buffer.sample(config.batch_size, device)
                         maddpg.update(sample, a_i, a_n, logger=logger)
                     maddpg.update_all_targets()
                 maddpg.prep_rollouts(device="cpu")
                 # Intrinsic
-                if USE_CUDA:
-                    intrinsic_maddpg.prep_training(device="gpu")
-                else:
-                    intrinsic_maddpg.prep_training(device="cpu")
+                intrinsic_maddpg.prep_training(device=device)
+                # if USE_CUDA:
+                #     intrinsic_maddpg.prep_training(device="gpu")
+                # else:
+                #     intrinsic_maddpg.prep_training(device="cpu")
                 for u_i in range(config.n_rollout_threads):
                     for a_i, a_n in enumerate(env.possible_agents):
                         sample = intrinsic_replay_buffer.sample(
-                            config.batch_size, to_gpu=USE_CUDA
+                            config.batch_size,
+                            device,
                         )
                         intrinsic_maddpg.update(
                             sample, a_i, a_n + "_intrinsic", logger=logger
@@ -391,6 +400,7 @@ if __name__ == "__main__":
         "--adversary_alg", default="MADDPG", type=str, choices=["MADDPG", "DDPG"]
     )
     parser.add_argument("--discrete_action", action="store_true")
+    parser.add_argument("--device", help="Set device", default="cpu", type=str)
 
     config = parser.parse_args()
 

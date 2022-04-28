@@ -205,45 +205,52 @@ class MADDPG(object):
             soft_update(a.target_policy, a.policy, self.tau)
         self.niter += 1
 
-    def prep_training(self, device="gpu"):
+    def prep_training(self, device="cpu"):
+        for a in self.agents:
+            a.policy.to(device)
+            a.critic.to(device)
+            a.target_policy.to(device)
+            a.target_critic.to(device)
         for a in self.agents:
             a.policy.train()
             a.critic.train()
             a.target_policy.train()
             a.target_critic.train()
-        if device == "gpu":
-            fn = lambda x: x.cuda()
-        else:
-            fn = lambda x: x.cpu()
-        if not self.pol_dev == device:
-            for a in self.agents:
-                a.policy = fn(a.policy)
-            self.pol_dev = device
-        if not self.critic_dev == device:
-            for a in self.agents:
-                a.critic = fn(a.critic)
-            self.critic_dev = device
-        if not self.trgt_pol_dev == device:
-            for a in self.agents:
-                a.target_policy = fn(a.target_policy)
-            self.trgt_pol_dev = device
-        if not self.trgt_critic_dev == device:
-            for a in self.agents:
-                a.target_critic = fn(a.target_critic)
-            self.trgt_critic_dev = device
+        # if device == "gpu":
+        #     fn = lambda x: x.cuda()
+        # else:
+        #     fn = lambda x: x.cpu()
+        # if not self.pol_dev == device:
+        #     for a in self.agents:
+        #         a.policy = fn(a.policy)
+        #     self.pol_dev = device
+        # if not self.critic_dev == device:
+        #     for a in self.agents:
+        #         a.critic = fn(a.critic)
+        #     self.critic_dev = device
+        # if not self.trgt_pol_dev == device:
+        #     for a in self.agents:
+        #         a.target_policy = fn(a.target_policy)
+        #     self.trgt_pol_dev = device
+        # if not self.trgt_critic_dev == device:
+        #     for a in self.agents:
+        #         a.target_critic = fn(a.target_critic)
+        #     self.trgt_critic_dev = device
 
     def prep_rollouts(self, device="cpu"):
         for a in self.agents:
+            a.policy.to(device)
+        for a in self.agents:
             a.policy.eval()
-        if device == "gpu":
-            fn = lambda x: x.cuda()
-        else:
-            fn = lambda x: x.cpu()
-        # only need main policy for rollouts
-        if not self.pol_dev == device:
-            for a in self.agents:
-                a.policy = fn(a.policy)
-            self.pol_dev = device
+        # if device == "gpu":
+        #     fn = lambda x: x.cuda()
+        # else:
+        #     fn = lambda x: x.cpu()
+        # # only need main policy for rollouts
+        # if not self.pol_dev == device:
+        #     for a in self.agents:
+        #         a.policy = fn(a.policy)
+        #     self.pol_dev = device
 
     def save(self, filename):
         """
