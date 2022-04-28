@@ -136,6 +136,12 @@ def run(config):
 
         # --- Rollout loop - we do for a fixed length
         for et_i in range(config.episode_length):
+
+            # If there are no agents the env
+            # should be restarted.
+            if len(env.agents) == 0:
+                obs = env.reset()
+
             # rearrange observations for maddpg
             torch_obs = [
                 torch.tensor(obs[a], requires_grad=False).unsqueeze(0)
@@ -146,8 +152,10 @@ def run(config):
             # rearrange actions for zoo environment
             agent_actions = {}
             for a, ac in zip(env.possible_agents, torch_agent_actions):
-                agent_actions[a] = ac.data.numpy().flatten()
-
+                # The env will only accept 'env.possible_agents',
+                # so we filter out the dead
+                if a in env.possible_agents:
+                    agent_actions[a] = ac.data.numpy().flatten()
             # !
             next_obs, rewards, dones, infos = env.step(agent_actions)
             replay_buffer.push(
@@ -185,19 +193,15 @@ def run(config):
                 else:
                     maddpg.prep_training(device="cpu")
                 for u_i in range(config.n_rollout_threads):
-                    # When `maddpg` is built it uses the env and 
-                    # env.possible_agents to setup itss own agents
+                    # When `maddpg` is built it uses the env and
+                    # env.possible_agents to setup its own agents
                     # BUT the agents are indexed by ints not keys
-                    # so wee need to loop over all possible but only
-                    # learn from current env.agents. This prevents
-                    # 'overtraining' on stale experiende in dead
-                    # agents who may never the less later revive.
+                    # so we need to loop over all possible.
                     for a_i, a_n in enumerate(env.possible_agents):
-                        if a_n in env.agents:
-                            sample = replay_buffer.sample(
-                                config.batch_size, to_gpu=USE_CUDA
-                            )
-                            maddpg.update(sample, a_i, a_n, logger=logger)
+                        sample = replay_buffer.sample(
+                            config.batch_size, to_gpu=USE_CUDA
+                        )
+                        maddpg.update(sample, a_i, a_n, logger=logger)
                     maddpg.update_all_targets()
                 maddpg.prep_rollouts(device="cpu")
 
