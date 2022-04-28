@@ -1,14 +1,14 @@
 import torch
 import torch.nn.functional as F
 from gym.spaces import Box, Discrete
-from utils.networks import MLPNetwork
-from utils.misc import (
+from infoduel_maddpg.utils.networks import MLPNetwork
+from infoduel_maddpg.utils.misc import (
     soft_update,
     average_gradients,
     onehot_from_logits,
     gumbel_softmax,
 )
-from utils.agents import DDPGAgent
+from infoduel_maddpg.utils.agents import DDPGAgent
 
 MSELoss = torch.nn.MSELoss()
 
