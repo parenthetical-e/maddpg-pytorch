@@ -1,4 +1,6 @@
 import argparse
+import imp
+from multiprocessing.spawn import import_main_path
 
 # import imp
 import torch
@@ -20,6 +22,10 @@ from supersuit import stable_baselines3_vec_env_v0
 from supersuit import gym_vec_env_v0
 from supersuit import pettingzoo_env_to_vec_env_v1
 from supersuit import clip_actions_v0
+
+from dualer.wrappers.academic import StatePrediction
+from dualer.wrappers.normalize import FoldChangeReward
+from dualer.wrappers.normalize import MovingFoldChangeReward
 
 USE_CUDA = False  # torch.cuda.is_available()
 
@@ -87,6 +93,10 @@ def run(config):
     env = Env.parallel_env(continuous_actions=True)
     env = clip_actions_v0(env)
     env.reset()
+
+    academic = Env.parallel_env(continuous_actions=True)
+    academic = clip_actions_v0(academic)
+    academic = StatePrediction(academic)
 
     # Make access to 'space' info in format that is
     # expected through the codebase
@@ -242,6 +252,7 @@ if __name__ == "__main__":
     parser.add_argument("--hidden_dim", default=64, type=int)
     parser.add_argument("--lr", default=0.01, type=float)
     parser.add_argument("--tau", default=0.01, type=float)
+    parser.add_argument("--eta", default=1.0, type=float)
     parser.add_argument(
         "--agent_alg", default="MADDPG", type=str, choices=["MADDPG", "DDPG"]
     )
