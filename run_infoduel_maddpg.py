@@ -22,30 +22,6 @@ from infoduel_maddpg.utils.academic_wrappers import StatePrediction
 USE_CUDA = False  # torch.cuda.is_available()
 
 
-def make_env(env_id, n_rollout_threads, seed, discrete_action=False):
-    # Ugly:
-    # A closure dance (for some reason) to init the env
-    Env = getattr(mpe, env_id)
-
-    def get_env_fn(rank):
-        def init_env():
-            if discrete_action:
-                env = Env.parallel_env(continuous_actions=False)
-            else:
-                env = Env.parallel_env(continuous_actions=True)
-            env.seed(seed + rank * 1000)
-            np.random.seed(seed + rank * 1000)
-
-            return env
-
-        return init_env
-
-    if n_rollout_threads == 1:
-        return DummyVecEnv([get_env_fn(0)])
-    else:
-        return SubprocVecEnv([get_env_fn(i) for i in range(n_rollout_threads)])
-
-
 def run(config):
     # --- Seeds etc
     torch.manual_seed(config.seed)
@@ -86,8 +62,14 @@ def run(config):
     # we can do without this clip, technically,
     # but a ot of warnings follow, so...
     env = clip_actions_v0(env)
+
     # generates intrinsic/reward
-    env = StatePrediction(env, network_hidden=[100, 50], lr=0.0001)
+    # We:
+    # - share the size of the hidden layer
+    # between academics and actors
+    # - Scale academic learning monotonically
+    # with actors (the maddpg)
+    env = StatePrediction(env, network_hidden=[config.hidden_dim], lr=config.lr / 10)
     env.reset()
 
     # Make access to 'space' info in format that is
@@ -153,25 +135,36 @@ def run(config):
         # )
         # maddpg.reset_noise()
 
+        # --- Look up the postition in the buffer
+        # from last episode (used in the infoduel)
+        last_n = replay_buffer.filled_i - config.episode_length
+        # print("last_n", last_n)
+
+        # --- Use curious inspiration? (aka parkid)
+        inspiration = 0.0
+        if config.kappa > 0:
+            for i, a in enumerate(env.possible_agents):
+                inspiration += intrinsic_replay_buffer.rew_buffs[i][last_n:].max()
+
         # --- Do the INFODUEL!
         # Set the policy on a per episode basis for a little more
         # stability then on every step. This is violation of out
         # formality, but only a little one. :)
         meta_maddpg = {}
         for i, a in enumerate(env.possible_agents):
-            # Look up last episodes returns, with a
-            # default for the start
-            last_n = replay_buffer.filled_i - config.episode_length
-            # print("last_n", last_n)
             if last_n < 1:
                 last_reward = 0.0
                 last_intrinsic = config.eta + 0.0001  # favor at the start
             else:
-                # Get best from last episode. The best is what we duel with!
+                # Get best from last episode.
+                # The best is what we duel with!
                 last_reward = replay_buffer.rew_buffs[i][last_n:].min()
                 last_intrinsic = intrinsic_replay_buffer.rew_buffs[i][last_n:].max()
 
-            # Use best to set the policy, agent by agent.
+            # Add contagious curiosity?
+            last_intrinsic += inspiration * config.kappa
+
+            # Use best value to set the policy, agent by agent.
             # They can either persue rewards or info value,
             # but never both at the same time...
             #
@@ -389,7 +382,13 @@ if __name__ == "__main__":
     parser.add_argument("--hidden_dim", default=64, type=int)
     parser.add_argument("--lr", default=0.01, type=float)
     parser.add_argument("--tau", default=0.01, type=float)
-    parser.add_argument("--eta", default=1.0, type=float)
+    parser.add_argument("--eta", default=0.001, type=float, help="Boredom parameter")
+    parser.add_argument(
+        "--kappa",
+        default=0.0,
+        type=float,
+        help="Info value sharing wieght (>0 activates 'parkid' mode)",
+    )
     parser.add_argument(
         "--agent_alg", default="MADDPG", type=str, choices=["MADDPG", "DDPG"]
     )
