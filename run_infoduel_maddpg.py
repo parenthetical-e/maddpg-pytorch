@@ -105,7 +105,7 @@ def run(config):
         [acsp.shape[0] if isinstance(acsp, Box) else acsp.n for acsp in action_space],
     )
     intrinsic_replay_buffer = ReplayBuffer(
-        config.info_buffer_length,
+        config.buffer_length,
         maddpg.nagents,
         [obsp.shape[0] for obsp in observation_space],
         [acsp.shape[0] if isinstance(acsp, Box) else acsp.n for acsp in action_space],
@@ -149,7 +149,6 @@ def run(config):
         if config.kappa > 0:
             for i, a in enumerate(env.possible_agents):
                 inspiration += intrinsic_replay_buffer.rew_buffs[i][last_n:].max()
-            print("inspiration", inspiration)
 
         # --- Do the INFODUEL!
         # Set the policy on a per episode basis for a little more
@@ -365,7 +364,6 @@ if __name__ == "__main__":
     parser.add_argument("--n_rollout_threads", default=1, type=int)
     parser.add_argument("--n_training_threads", default=6, type=int)
     parser.add_argument("--buffer_length", default=int(1e6), type=int)
-    parser.add_argument("--info_buffer_length", default=int(500), type=int)
     parser.add_argument("--n_episodes", default=25000, type=int)
     parser.add_argument("--episode_length", default=25, type=int)
     parser.add_argument("--steps_per_update", default=100, type=int)
