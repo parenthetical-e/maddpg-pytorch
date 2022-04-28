@@ -96,7 +96,7 @@ class MADDPG(object):
             a.step(obs, explore=explore) for a, obs in zip(self.agents, observations)
         ]
 
-    def update(self, sample, agent_i, parallel=False, logger=None):
+    def update(self, sample, agent_i, agent_name, parallel=False, logger=None):
         """
         Update parameters of agent model based on sample from replay buffer
         Inputs:
@@ -190,7 +190,7 @@ class MADDPG(object):
         curr_agent.policy_optimizer.step()
         if logger is not None:
             logger.add_scalars(
-                f"agent_{agent_i}/losses",
+                f"{agent_name}/losses",
                 {"vf_loss": vf_loss, "pol_loss": pol_loss},
                 self.niter,
             )
