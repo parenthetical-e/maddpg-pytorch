@@ -56,9 +56,6 @@ class StatePrediction(gym.Wrapper):
         # Init net
         self.lr = float(lr)
         self.network_hidden = network_hidden
-        # TODO: fix for agents
-        self.network_input = env.observation_space.shape[0]  # Assume state vec
-        self.network_output = self.network_input  # Same size
 
         self._init_network()
         self._init_optimizer()
@@ -72,36 +69,44 @@ class StatePrediction(gym.Wrapper):
         self.target = {}
 
         for i, a in enumerate(self.possible_agents):
+            # Set network input sizes which can vary by agent
+            network_input = self.env.observation_space(a).shape[0]
+            # In state prediction output size as input
+            # aka 'this is not a typo'
+            network_output = network_input
+
             # One network / env
             self.network[a] = nn.Sequential(
                 *create_mlp(
-                    self.network_input[i],
-                    self.network_output[i],
+                    network_input,
+                    network_output,
                     self.network_hidden,
                 )
             )
-
             self.target[a] = nn.Sequential(
                 *create_mlp(
-                    self.network_input[i],
-                    self.network_output[i],
+                    network_input,
+                    network_output,
                     self.network_hidden,
                 )
             )
-
-            # To device
             self.network[a].to(self.device)
             self.target[a].to(self.device)
 
     def _init_optimizer(self):
         self.optimizer = {}
-        for a in range(self.possible_agents):
+        for a in self.possible_agents:
             self.optimizer[a] = optim.Adam(self.network[a].parameters(), self.lr)
 
     def _learn(self, state, next_state):
-        intrinsics = []
-        losses = []
-        for i, a in enumerate(self.agents):
+        intrinsics = {}
+        losses = {}
+
+        # It is important to loop over env.agents
+        # and not env.possible_agents because in the
+        # AEC/zoo formalism 'done' (dead) agent's states
+        # rewards etc are not returned on env.step()
+        for i, a in enumerate(self.env.agents):
             network = self.network[a]  # brevity
             target = self.target[a]
             optimizer = self.optimizer[a]
@@ -151,10 +156,10 @@ class StatePrediction(gym.Wrapper):
             else:
                 raise ValueError("mode not known")
 
-            intrinsics.append(intrinsic)
-            losses.append(
-                {"network_loss": loss.detach().cpu().squeeze().numpy().item()}
-            )
+            intrinsics[a] = intrinsic
+            losses[a] = {
+                "network_loss": loss.detach().cpu().squeeze().numpy().item(),
+            }
 
         return intrinsics, losses
 
@@ -163,14 +168,18 @@ class StatePrediction(gym.Wrapper):
         # Estimate the academic reward
         intrinsics, intrinsic_infos = self._learn(self._state, next_states)
         # Mix rewards
-        totals = (rewards * self.reward_weight) + (intrinsics * self.intrinsic_weight)
+        totals = {}
+        for a in self.agents:
+            totals[a] = (rewards[a] * self.reward_weight) + (
+                intrinsics[a] * self.intrinsic_weight
+            )
         # Shift
         self._state = next_states.copy()
         # Update info
         for i, a in enumerate(self.agents):
-            infos[a]["env_reward"] = rewards[a].item()
-            infos[a]["intrinsic_reward"] = intrinsics[i].item()
-            infos[a].update(intrinsic_infos[i])
+            infos[a]["env_reward"] = rewards[a]
+            infos[a]["intrinsic_reward"] = intrinsics[a].item()
+            infos[a].update(intrinsic_infos[a])
 
         return next_states, totals, dones, infos
 
