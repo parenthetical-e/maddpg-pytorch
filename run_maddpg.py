@@ -15,6 +15,8 @@ from infoduel_maddpg.utils.buffer import ReplayBuffer
 from infoduel_maddpg.core import MADDPG
 
 from stable_baselines3.common.vec_env import SubprocVecEnv, DummyVecEnv
+from stable_baselines3.common.utils import get_device
+
 from pettingzoo import mpe
 from supersuit import stable_baselines3_vec_env_v0
 from supersuit import gym_vec_env_v0
@@ -22,30 +24,6 @@ from supersuit import pettingzoo_env_to_vec_env_v1
 from supersuit import clip_actions_v0
 
 USE_CUDA = False  # torch.cuda.is_available()
-
-
-def make_env(env_id, n_rollout_threads, seed, discrete_action=False):
-    # Ugly:
-    # A closure dance (for some reason) to init the env
-    Env = getattr(mpe, env_id)
-
-    def get_env_fn(rank):
-        def init_env():
-            if discrete_action:
-                env = Env.parallel_env(continuous_actions=False)
-            else:
-                env = Env.parallel_env(continuous_actions=True)
-            env.seed(seed + rank * 1000)
-            np.random.seed(seed + rank * 1000)
-
-            return env
-
-        return init_env
-
-    if n_rollout_threads == 1:
-        return DummyVecEnv([get_env_fn(0)])
-    else:
-        return SubprocVecEnv([get_env_fn(i) for i in range(n_rollout_threads)])
 
 
 def run(config):
