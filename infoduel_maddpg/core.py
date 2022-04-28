@@ -273,11 +273,11 @@ class MADDPG(object):
         agent_init_params = []
         alg_types = [
             adversary_alg if atype.startswith("adversary") else agent_alg
-            for atype in env.agents
+            for atype in env.possible_agents
         ]
 
-        action_space = [env.action_space(a) for a in env.agents]
-        observation_space = [env.observation_space(a) for a in env.agents]
+        action_space = [env.action_space(a) for a in env.possible_agents]
+        observation_space = [env.observation_space(a) for a in env.possible_agents]
         for acsp, obsp, algtype in zip(action_space, observation_space, alg_types):
             num_in_pol = obsp.shape[0]
             if isinstance(acsp, Box):
