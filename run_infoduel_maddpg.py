@@ -69,7 +69,11 @@ def run(config):
     # between academics and actors
     # - Scale academic learning monotonically
     # with actors (the maddpg)
-    env = StatePrediction(env, network_hidden=[config.hidden_dim], lr=config.lr / 10)
+    env = StatePrediction(
+        env,
+        network_hidden=[config.hidden_dim],
+        lr=config.lr / 10.0,
+    )
     env.reset()
 
     # Make access to 'space' info in format that is
@@ -145,6 +149,7 @@ def run(config):
         if config.kappa > 0:
             for i, a in enumerate(env.possible_agents):
                 inspiration += intrinsic_replay_buffer.rew_buffs[i][last_n:].max()
+            print("inspiration", inspiration)
 
         # --- Do the INFODUEL!
         # Set the policy on a per episode basis for a little more
@@ -158,7 +163,7 @@ def run(config):
             else:
                 # Get best from last episode.
                 # The best is what we duel with!
-                last_reward = replay_buffer.rew_buffs[i][last_n:].min()
+                last_reward = replay_buffer.rew_buffs[i][last_n:].max()
                 last_intrinsic = intrinsic_replay_buffer.rew_buffs[i][last_n:].max()
 
             # Add contagious curiosity?
@@ -188,6 +193,7 @@ def run(config):
                 last_intrinsic - config.eta,
                 ep_i,
             )
+            logger.add_scalar(f"{a}_intrinsic/inspiration", inspiration, ep_i)
 
         # --- Rollout loop
         # (we go for a fixed length)
@@ -202,38 +208,23 @@ def run(config):
                 torch.tensor(obs[a], requires_grad=False).unsqueeze(0)
                 for a in env.agents
             ]
-            # When `maddpg` is built it uses the env and
-            # env.possible_agents to setup itss own agents
-            # BUT the agents are indexed by ints not keys
-            # so wee need to loop over all possible but only
-            # step from current env.agents.
+
+            # Use meta_maddpg to step each agent
+            # to get their actions
             agent_actions = {}
-            if a in env.possible_agents:
+            for i, a in enumerate(env.possible_agents):
                 act = meta_maddpg[a].step(torch_obs[i], explore=False)
                 act = act.data.numpy().flatten()
                 agent_actions[a] = act
 
-            # print("last_reward:", last_reward)
-            # print("last_intrinsic:", last_intrinsic)
-            # print("last_intrinsic (adj):", last_intrinsic - config.eta)
-            # print("meta_maddpg: ", meta_maddpg)
-
-            # Agents act 'at once' (as parallelized AEC)
-            # torch_agent_actions = maddpg.step(torch_obs, explore=True)
-
-            # rearrange actions for zoo environment
-            # agent_actions = {}
-            # for a, ac in zip(env.possible_agents, torch_agent_actions):
-            #     agent_actions[a] = ac.data.numpy().flatten()
-
-            # !
+            # ...and apply these actions to the env
             next_obs, _, dones, infos = env.step(agent_actions)
+
             # We wraaped the env in StatePrediction, a kind of
             # acamemic wrapper that normally returns some user
-            # set mixture of intrinsix rewards. However the
-            # 'infos' contains the pure reward and intrinsic, so
+            # set mixture of intrinsic and rewards. However the
+            # 'infos' contains the pure reward and intrinsic so
             # we extact and buffer them independently.
-            # print("infos", infos)
             replay_buffer.push(
                 [obs[a] for a in env.possible_agents],
                 [agent_actions[a] for a in env.possible_agents],
@@ -259,12 +250,17 @@ def run(config):
             # print("obs.shape:", list(obs.values())[0].shape)
             # print("obs:", obs)
             # print("torch_obs:", torch_obs)
-            # print("actions[0].shape:", list(agent_actions.values())[0].shape)
-            # print("agent_actions:", agent_actions)
-            # print("torch_agent_actions:", torch_agent_actions)
-            # print("dones:", dones)
+            # print("last_reward:", last_reward)
+            # print("last_intrinsic:", last_intrinsic)
+            # print("last_intrinsic (adj):", last_intrinsic - config.eta)
+            # print("meta_maddpg: ", meta_maddpg)
+            # print("agent_actions: ", agent_actions)
+            # print("env.possible_agents: ", env.possible_agents)
+            # print("env.agents: ", env.agents)
             # print("rewards:", rewards)
             # print("next_obs:", next_obs)
+            # print("infos", infos)
+            # print("dones:", dones)
 
             # train (ugly code)
             if (
