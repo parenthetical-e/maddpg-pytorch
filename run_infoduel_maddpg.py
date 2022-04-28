@@ -105,7 +105,7 @@ def run(config):
         [acsp.shape[0] if isinstance(acsp, Box) else acsp.n for acsp in action_space],
     )
     intrinsic_replay_buffer = ReplayBuffer(
-        config.buffer_length,
+        config.info_buffer_length,
         maddpg.nagents,
         [obsp.shape[0] for obsp in observation_space],
         [acsp.shape[0] if isinstance(acsp, Box) else acsp.n for acsp in action_space],
@@ -365,6 +365,7 @@ if __name__ == "__main__":
     parser.add_argument("--n_rollout_threads", default=1, type=int)
     parser.add_argument("--n_training_threads", default=6, type=int)
     parser.add_argument("--buffer_length", default=int(1e6), type=int)
+    parser.add_argument("--info_buffer_length", default=int(500), type=int)
     parser.add_argument("--n_episodes", default=25000, type=int)
     parser.add_argument("--episode_length", default=25, type=int)
     parser.add_argument("--steps_per_update", default=100, type=int)
