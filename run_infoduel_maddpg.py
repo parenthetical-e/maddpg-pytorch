@@ -1,4 +1,5 @@
 import argparse
+from curses import meta
 import imp
 from multiprocessing.spawn import import_main_path
 
@@ -92,11 +93,8 @@ def run(config):
     Env = getattr(mpe, config.env_id)
     env = Env.parallel_env(continuous_actions=True)
     env = clip_actions_v0(env)
+    env = StatePrediction(env)  # generates intrinsic/reward
     env.reset()
-
-    academic = Env.parallel_env(continuous_actions=True)
-    academic = clip_actions_v0(academic)
-    academic = StatePrediction(academic)
 
     # Make access to 'space' info in format that is
     # expected through the codebase
@@ -112,7 +110,21 @@ def run(config):
         lr=config.lr,
         hidden_dim=config.hidden_dim,
     )
+    intrinsic_maddpg = MADDPG.init_from_env(
+        env,
+        agent_alg=config.agent_alg,
+        adversary_alg=config.adversary_alg,
+        tau=config.tau,
+        lr=config.lr,
+        hidden_dim=config.hidden_dim,
+    )
     replay_buffer = ReplayBuffer(
+        config.buffer_length,
+        maddpg.nagents,
+        [obsp.shape[0] for obsp in observation_space],
+        [acsp.shape[0] if isinstance(acsp, Box) else acsp.n for acsp in action_space],
+    )
+    intrinsic_replay_buffer = ReplayBuffer(
         config.buffer_length,
         maddpg.nagents,
         [obsp.shape[0] for obsp in observation_space],
@@ -135,35 +147,83 @@ def run(config):
         obs = env.reset()
         maddpg.prep_rollouts(device="cpu")
 
-        explr_pct_remaining = (
-            max(0, config.n_exploration_eps - ep_i) / config.n_exploration_eps
-        )
-        maddpg.scale_noise(
-            config.final_noise_scale
-            + (config.init_noise_scale - config.final_noise_scale) * explr_pct_remaining
-        )
-        maddpg.reset_noise()
+        # explr_pct_remaining = (
+        #     max(0, config.n_exploration_eps - ep_i) / config.n_exploration_eps
+        # )
+        # maddpg.scale_noise(
+        #     config.final_noise_scale
+        #     + (config.init_noise_scale - config.final_noise_scale) * explr_pct_remaining
+        # )
+        # maddpg.reset_noise()
+
+        # --- Do the INFODUEL!
+        # Set the policy on a per episode basis for a little more
+        # stability then on every step. This is violation of out
+        # formality, but only a little one. :)
+        meta_maddpg = {}
+        for a in env.agents:
+            # Get best from last episode. The best is what we duel with!
+            last_reward = replay_buffer.rew_buffs[a].max()
+            last_intrinsic = intrinsic_replay_buffer.rew_buffs[a].max()
+
+            # Use best to set the policy, agent by agent.
+            # They can either persue rewards or info value,
+            # but never both at the same time...
+            #
+            # This is why
+            # we call this library 'INFODUEL'
+            if last_reward >= (last_intrinsic - config.eta):
+                meta_maddpg[a] = maddpg
+            else:
+                meta_maddpg[a] = intrinsic_maddpg
 
         # --- Rollout loop - we do for a fixed length
         for et_i in range(config.episode_length):
             # rearrange observations for maddpg
             torch_obs = [
                 torch.tensor(obs[a], requires_grad=False).unsqueeze(0)
-                for a in env.possible_agents
+                for a in env.agents
             ]
-            # Agents act 'at once' (as parallelized AEC)
-            torch_agent_actions = maddpg.step(torch_obs, explore=True)
-            # rearrange actions for zoo environment
             agent_actions = {}
-            for a, ac in zip(env.possible_agents, torch_agent_actions):
-                agent_actions[a] = ac.data.numpy().flatten()
+            for i, a in enumerate(env.agents):
+                act = meta_maddpg[a].agent.step(torch_obs[i])
+                act = act.data.numpy().flatten()
+                agent_actions[a] = act
+
+            print(">>>>> Episode start <<<<<<<<")
+            print("last_reward:", last_reward)
+            print("last_intrinsic:", last_intrinsic)
+            print("last_intrinsic (adj):", last_intrinsic - config.eta)
+            print("meta_maddpg: ", meta_maddpg)
+
+            # Agents act 'at once' (as parallelized AEC)
+            # torch_agent_actions = maddpg.step(torch_obs, explore=True)
+
+            # rearrange actions for zoo environment
+            # agent_actions = {}
+            # for a, ac in zip(env.possible_agents, torch_agent_actions):
+            #     agent_actions[a] = ac.data.numpy().flatten()
 
             # !
-            next_obs, rewards, dones, infos = env.step(agent_actions)
+            next_obs, _, dones, infos = env.step(agent_actions)
+            # We wraaped the env in StatePrediction, a kind of
+            # acamemic wrapper that normally returns some user
+            # set mixture of intrinsix rewards. However the
+            # 'infos' contains the pure reward and intrinsic, so
+            # we extact and buffer them independently.
+            rewards = infos["env_reward"]
+            intrinsics = infos["intrinsic_reward"]
             replay_buffer.push(
                 [obs[a] for a in env.possible_agents],
                 [agent_actions[a] for a in env.possible_agents],
                 [rewards[a] for a in env.possible_agents],
+                [next_obs[a] for a in env.possible_agents],
+                [dones[a] for a in env.possible_agents],
+            )
+            intrinsic_replay_buffer.push(
+                [obs[a] for a in env.possible_agents],
+                [agent_actions[a] for a in env.possible_agents],
+                [intrinsics[a] for a in env.possible_agents],
                 [next_obs[a] for a in env.possible_agents],
                 [dones[a] for a in env.possible_agents],
             )
@@ -190,6 +250,7 @@ def run(config):
                 len(replay_buffer) >= config.batch_size
                 and (t % config.steps_per_update) < config.n_rollout_threads
             ):
+                # Reward
                 if USE_CUDA:
                     maddpg.prep_training(device="gpu")
                 else:
@@ -202,6 +263,19 @@ def run(config):
                         maddpg.update(sample, a_i, logger=logger)
                     maddpg.update_all_targets()
                 maddpg.prep_rollouts(device="cpu")
+                # Intrinsic
+                if USE_CUDA:
+                    intrinsic_maddpg.prep_training(device="gpu")
+                else:
+                    intrinsic_maddpg.prep_training(device="cpu")
+                for u_i in range(config.n_rollout_threads):
+                    for a_i in range(intrinsic_maddpg.nagents):
+                        sample = intrinsic_replay_buffer.sample(
+                            config.batch_size, to_gpu=USE_CUDA
+                        )
+                        intrinsic_maddpg.update(sample, a_i, logger=logger)
+                    intrinsic_maddpg.update_all_targets()
+                intrinsic_maddpg.prep_rollouts(device="cpu")
 
         # --- Post-episode LOG....
         # Data
@@ -220,11 +294,18 @@ def run(config):
         # Models
         if ep_i % config.save_interval < config.n_rollout_threads:
             os.makedirs(run_dir / "incremental", exist_ok=True)
-            maddpg.save(run_dir / "incremental" / ("model_ep%i.pt" % (ep_i + 1)))
+            # reward
+            maddpg.save(run_dir / "incremental" / (f"model_ep{ep_i}.pt"))
             maddpg.save(run_dir / "model.pt")
+            # intrinsic
+            intrinsic_maddpg.save(
+                run_dir / "incremental" / (f"intrinsic_model_ep{ep_i}.pt")
+            )
+            intrinsic_maddpg.save(run_dir / "intrinsic_model.pt")
 
     # --- Cleanup/save/etc are done
     maddpg.save(run_dir / "model.pt")
+    intrinsic_maddpg.save(run_dir / "intrinsic_model.pt")
     env.close()
     logger.close()
 
