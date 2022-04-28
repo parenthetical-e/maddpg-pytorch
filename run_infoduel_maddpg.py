@@ -79,6 +79,7 @@ def run(config):
         env,
         network_hidden=[config.hidden_dim],
         lr=config.lr / 10.0,
+        device=device,
     )
     env.reset()
 
