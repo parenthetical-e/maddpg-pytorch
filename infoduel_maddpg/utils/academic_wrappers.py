@@ -67,8 +67,7 @@ class StatePrediction(gym.Wrapper):
 
         self.network = {}
         self.target = {}
-
-        for i, a in enumerate(self.possible_agents):
+        for a in self.possible_agents:
             # Set network input sizes which can vary by agent
             network_input = self.env.observation_space(a).shape[0]
             # In state prediction output size as input
@@ -106,7 +105,10 @@ class StatePrediction(gym.Wrapper):
         # and not env.possible_agents because in the
         # AEC/zoo formalism 'done' (dead) agent's states
         # rewards etc are not returned on env.step()
-        for i, a in enumerate(self.env.agents):
+        for a in state.keys():
+            if a not in next_state:
+                continue  # can't learn is next is nill
+
             network = self.network[a]  # brevity
             target = self.target[a]
             optimizer = self.optimizer[a]
@@ -165,18 +167,17 @@ class StatePrediction(gym.Wrapper):
 
     def step(self, actions):
         next_states, rewards, dones, infos = self.env.step(actions)
-        # Estimate the academic reward
         intrinsics, intrinsic_infos = self._learn(self._state, next_states)
         # Mix rewards
         totals = {}
-        for a in self.agents:
+        for a in rewards.keys():
             totals[a] = (rewards[a] * self.reward_weight) + (
                 intrinsics[a] * self.intrinsic_weight
             )
         # Shift
         self._state = next_states.copy()
         # Update info
-        for i, a in enumerate(self.agents):
+        for a in rewards.keys():
             infos[a]["env_reward"] = rewards[a]
             infos[a]["intrinsic_reward"] = intrinsics[a].item()
             infos[a].update(intrinsic_infos[a])
