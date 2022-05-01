@@ -1,3 +1,4 @@
+from collections import deque
 from copy import deepcopy
 from statistics import mean
 
@@ -30,25 +31,39 @@ def fold_change(rewards, reference_reward, bias=0):
     return rewards + bias
 
 
-class RandomBuffer:
+class SequentialBuffer:
     def __init__(self, buffer_size):
         self.buffer_size = int(buffer_size)
-        self.buffer = list()
+        self.buffer = deque([], self.buffer_size)
 
     def __len__(self):
         return len(self.buffer)
 
     def append(self, x):
-        # Sanity
-        assert len(self.buffer) <= self.buffer_size, "buffer too big"
+        x = np.atleast_1d(x)
+        self.buffer.append(x)
 
+    def sample(self):
+        return self.buffer
+
+
+class RandomBuffer:
+    def __init__(self, buffer_size):
+        self.buffer_size = int(buffer_size)
+        self.buffer = list()
+        self.count = 0
+
+    def __len__(self):
+        return len(self.buffer)
+
+    def append(self, x):
         # Force min d and into np
         x = np.atleast_1d(x)
 
         # If smaller than buffer size, append
-        if len(self.buffer) < self.buffer_size:
+        if self.count <= self.buffer_size:
             self.buffer.append(deepcopy(x))
-
+            self.count += 1
         # Otherwise make a random insert
         else:
             i = np.random.randint(0, self.buffer_size)
@@ -118,7 +133,8 @@ class MovingFoldChangeReward(gym.Wrapper):
         self.reference_reward = {}
         for a in self.possible_agents:
             # Init
-            self.buffer[a] = RandomBuffer(self.buffer_size)
+            # self.buffer[a] = RandomBuffer(self.buffer_size)
+            self.buffer[a] = SequentialBuffer(self.buffer_size)
             # Fill
             for _ in range(self.buffer_size):
                 self.buffer[a].append(intial_reference_reward)
