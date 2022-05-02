@@ -29,7 +29,7 @@ from dualer.common import FrozenConv
 from dualer.common import FrozenTLP
 
 
-class StatePrediction(gym.Wrapper):
+class StatePredictionWrapper(gym.Wrapper):
     """An academic wrapper for doing state prediction."""
 
     def __init__(
