@@ -28,7 +28,10 @@ from dualer.common import create_mlp
 from dualer.common import FrozenConv
 from dualer.common import FrozenTLP
 
-
+# TODO - a 'rewrap' mode that uses a new attr .last() that returns
+# the last step return for re-processing. This ensures next_state
+# consistency and most of all comp. eff. env.step(.) might be expensive
+# and it is silly to have to full envd
 class StatePredictionWrapper(gym.Wrapper):
     """An academic wrapper for doing state prediction."""
 
