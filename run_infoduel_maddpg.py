@@ -72,7 +72,7 @@ def run(config):
     academic = clip_actions_v0(academic)
     academic = StatePredictionWrapper(
         academic,
-        network_hidden=[64],
+        network_hidden=[config.hidden_dim],
         lr=config.lr / 10,
         device=device,
     )
@@ -84,7 +84,7 @@ def run(config):
     )
     academic = MovingFoldChangeRewardWrapper(
         academic,
-        intial_reference_reward=0.01,
+        intial_reference_reward=0.001,
         bias_reward=0,
     )
     # Clip
@@ -110,7 +110,7 @@ def run(config):
         hidden_dim=config.hidden_dim,
     )
     intrinsic_maddpg = MADDPG.init_from_env(
-        env,
+        academic,
         agent_alg=config.agent_alg,
         adversary_alg=config.adversary_alg,
         tau=config.tau,
@@ -328,7 +328,7 @@ if __name__ == "__main__":
     )
     parser.add_argument("--seed", default=1, type=int, help="Random seed")
     parser.add_argument("--n_training_threads", default=6, type=int)
-    parser.add_argument("--buffer_length", default=int(1e6), type=int)
+    parser.add_argument("--buffer_length", default=25000, type=int)
     parser.add_argument("--n_episodes", default=25000, type=int)
     parser.add_argument("--episode_length", default=25, type=int)
     parser.add_argument("--steps_per_update", default=100, type=int)
