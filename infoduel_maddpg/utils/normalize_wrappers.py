@@ -65,30 +65,6 @@ class SequentialBuffer:
         return self.buffer
 
 
-class ClipReward:
-    """Clip rewards.
-
-    NOTE: assumes an AEC-style inputs
-    """
-
-    def __init__(self, min_reward=0, max_reward=1):
-        self.min_reward = min_reward
-        self.max_reward = max_reward
-
-    def step(self, rewards):
-        rewards = self.normalize(rewards)
-        return rewards
-
-    def normalize(self, rewards):
-        clip_rewards = {}
-        for a in rewards.keys():
-            clip_rewards[a] = np.clip(rewards[a], self.min_reward, self.max_reward)
-        return clip_rewards
-
-    def reset(self):
-        return None  # dummy
-
-
 # TODO - a 'rewrap' mode that uses a new attr .last() that returns
 # the last step return for re-processing. This ensures next_state
 # consistency and most of all comp. eff. env.step(.) might be expensive
@@ -100,6 +76,34 @@ class RewrapWrapper(gym.Wrapper):
     def step(self, actions):
         self.last_step = self.env.step(actions)
         return self.last_step
+
+
+class ClipRewardWrapper(gym.Wrapper):
+    """A gym wrapper to clip rewards between [min_reward, max_reward].
+
+    NOTE: assumes an AEC-style inputs
+    """
+
+    def __init__(self, env, min_reward=0, max_reward=1):
+        super().__init__(env)
+        self.env = env
+        self.min_reward = min_reward
+        self.max_reward = max_reward
+
+    def step(self, actions):
+        next_states, rewards, dones, infos = self.env.step(actions)
+        rewards = self.normalize(rewards)
+        return next_states, rewards, dones, infos
+
+    def normalize(self, rewards):
+        clip_rewards = {}
+        for a in rewards.keys():
+            clip_rewards[a] = np.clip(rewards[a], self.min_reward, self.max_reward)
+        return clip_rewards
+
+    def reset(self):
+        states = self.env.reset()
+        return states
 
 
 class MovingFoldChangeRewardWrapper(gym.Wrapper):
