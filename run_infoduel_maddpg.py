@@ -134,7 +134,7 @@ def run(config):
     # RUN loop: run a set of episodes (n_episodes), where each has a
     # pre-definited duration (episode_length)
     t = 0
-    for n in tqdm(range(config.n_episodes)):
+    for n in tqdm(range(config.n_episodes), desc=config.env_id):
         # Reset several things
         obs = env.reset()
         _ = academic.reset()
@@ -146,8 +146,9 @@ def run(config):
         inspiration = 0.0
         if config.kappa > 0:
             for i, a in enumerate(env.possible_agents):
-                inspiration += intrinsic_replay_buffer.get_max_rewards(
-                    config.episode_length
+                inspiration += (
+                    intrinsic_replay_buffer.get_max_rewards(config.episode_length)
+                    - config.eta
                 )
 
         # --- Do the INFODUEL!
@@ -174,7 +175,9 @@ def run(config):
             # This is why
             # we call this library 'INFODUEL'
             meta = None
-            if last_rewards[i] >= (last_intrinsics[i] - config.eta):
+            last_reward = last_rewards[i]
+            last_intrinsic = last_intrinsics[i] + inspiration
+            if last_reward >= (last_intrinsic - config.eta):
                 meta_maddpg[a] = maddpg.agents[i]
                 meta = 0  # default reward greed
             else:
@@ -182,21 +185,24 @@ def run(config):
                 meta = 1
 
             # Log here so I don't need to keep track of these
-            # last_* values
+            # last_* and policy values
             logger.add_scalar(f"{a}/policy", meta, n)
-            logger.add_scalar(f"{a}/last_reward", last_rewards[i], n)
-            logger.add_scalar(f"{a}_intrinsic/last_intrinsic", last_intrinsics[i], n)
+            logger.add_scalar(f"{a}/last_reward", last_reward, n)
+            logger.add_scalar(
+                f"{a}_intrinsic/last_intrinsic",
+                last_intrinsic,
+                n,
+            )
             logger.add_scalar(
                 f"{a}_intrinsic/last_intrinsic (adj)",
-                last_intrinsics[i] - config.eta,
+                last_intrinsic - config.eta,
                 n,
             )
             logger.add_scalar(f"{a}_intrinsic/inspiration", inspiration, n)
 
         # --- Rollout loop
-        # (we go for a fixed length)
         for _ in range(config.episode_length):
-            # If there are no agents the env
+            # If there are no agents, the env
             # should be restarted.
             if len(env.agents) == 0:
                 obs = env.reset()
