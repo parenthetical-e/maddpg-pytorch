@@ -4,6 +4,7 @@ import torch
 import numpy as np
 from gym.spaces import Box, Discrete
 from pathlib import Path
+from tqdm import tqdm
 
 from torch.utils.tensorboard import SummaryWriter
 
@@ -19,7 +20,9 @@ from supersuit import gym_vec_env_v0
 from supersuit import pettingzoo_env_to_vec_env_v1
 from supersuit import clip_actions_v0
 
-from infoduel_maddpg.utils.academic_wrappers import StatePrediction
+from infoduel_maddpg.utils.academic_wrappers import StatePredictionWrapper
+from infoduel_maddpg.utils.normalize_wrappers import ClipRewardWrapper
+from infoduel_maddpg.utils.normalize_wrappers import MovingFoldChangeRewardWrapper
 
 
 def run(config):
@@ -37,7 +40,7 @@ def run(config):
     #
     # ./models/env_id/model_name/run_INT
     model_dir = Path("./models") / config.env_id / config.model_name
-
+    # Generate unique names, `run#``
     if not model_dir.exists():
         curr_run = "run1"
     else:
@@ -53,35 +56,44 @@ def run(config):
     run_dir = model_dir / curr_run
     log_dir = run_dir / "logs"
     os.makedirs(log_dir)
-
+    # Our log at last....
     logger = SummaryWriter(str(log_dir))
 
     print(f"----- Running: {config.env_id} ------")
     print(f"device: {device}")
     print(f"log_dir: {log_dir}")
 
-    # --- Build the env, an MPE zoo
-    # TODO: add env_hparams as an arg
-
+    # --- Build the envs, an MPE zoo
     Env = getattr(mpe, config.env_id)
+    # Init
     env = Env.parallel_env(continuous_actions=True)
-    # we can do without this clip, technically,
-    # but a ot of warnings follow, so...
     env = clip_actions_v0(env)
-
-    # generates intrinsic/reward
-    # We:
-    # - share the size of the hidden layer
-    # between academics and actors
-    # - Scale academic learning monotonically
-    # with actors (the maddpg)
-    env = StatePrediction(
-        env,
-        network_hidden=[config.hidden_dim],
-        lr=config.lr / 10.0,
+    academic = Env.parallel_env(continuous_actions=True)
+    academic = clip_actions_v0(academic)
+    academic = StatePredictionWrapper(
+        academic,
+        network_hidden=[64],
+        lr=config.lr / 10,
         device=device,
     )
-    env.reset()
+    # Fold-change
+    env = MovingFoldChangeRewardWrapper(
+        env,
+        intial_reference_reward=-2,
+        bias_reward=0,
+    )
+    academic = MovingFoldChangeRewardWrapper(
+        academic,
+        intial_reference_reward=0.01,
+        bias_reward=0,
+    )
+    # Clip
+    env = ClipRewardWrapper(env, min_reward=-10, max_reward=10)
+    academic = ClipRewardWrapper(academic, min_reward=-10, max_reward=10)
+
+    # Seed
+    env.seed(config.seed)
+    academic.seed(config.seed)
 
     # Make access to 'space' info in format that is
     # expected through the codebase
@@ -122,59 +134,39 @@ def run(config):
     # RUN loop: run a set of episodes (n_episodes), where each has a
     # pre-definited duration (episode_length)
     t = 0
-    for ep_i in range(0, config.n_episodes, config.n_rollout_threads):
-        print(
-            f"Episodes {ep_i + 1}-{ep_i + 1 + config.n_rollout_threads} of {config.n_episodes}"
-        )
-
-        # Reset several things:
-        # - env.
-        # - buffers,
-        # - and the exploration noise (if it was used).
+    for n in tqdm(range(config.n_episodes)):
+        # Reset several things
         obs = env.reset()
+        _ = academic.reset()
+
         maddpg.prep_rollouts(device="cpu")
         intrinsic_maddpg.prep_rollouts(device="cpu")
-
-        # TODO - turn noise back on and port to intrinsix_maddpg?
-
-        # explr_pct_remaining = (
-        #     max(0, config.n_exploration_eps - ep_i) / config.n_exploration_eps
-        # )
-        # maddpg.scale_noise(
-        #     config.final_noise_scale
-        #     + (config.init_noise_scale - config.final_noise_scale) * explr_pct_remaining
-        # )
-        # maddpg.reset_noise()
-
-        # --- Look up the postition in the buffer
-        # from last episode (used in the infoduel)
-        last_n = replay_buffer.filled_i - config.episode_length
-        # print("last_n", last_n)
 
         # --- Use curious inspiration? (aka parkid)
         inspiration = 0.0
         if config.kappa > 0:
             for i, a in enumerate(env.possible_agents):
-                inspiration += intrinsic_replay_buffer.rew_buffs[i][last_n:].max()
+                inspiration += intrinsic_replay_buffer.get_max_rewards(
+                    config.episode_length
+                )
 
         # --- Do the INFODUEL!
         # Set the policy on a per episode basis for a little more
         # stability then on every step. This is violation of out
         # formality, but only a little one. :)
+        if n == 0:
+            last_rewards = [0] * len(env.possible_agents)
+            last_intrinsics = [config.eta + 0.0001,] * len(
+                academic.possible_agents
+            )  # favor first
+        else:
+            last_rewards = replay_buffer.get_max_rewards(config.episode_length)
+            last_intrinsics = intrinsic_replay_buffer.get_max_rewards(
+                config.episode_length
+            )
+
         meta_maddpg = {}
         for i, a in enumerate(env.possible_agents):
-            if last_n < 1:
-                last_reward = 0.0
-                last_intrinsic = config.eta + 0.0001  # favor at the start
-            else:
-                # Get best from last episode.
-                # The best is what we duel with!
-                last_reward = replay_buffer.rew_buffs[i][last_n:].max()
-                last_intrinsic = intrinsic_replay_buffer.rew_buffs[i][last_n:].max()
-
-            # Add contagious curiosity?
-            last_intrinsic += inspiration * config.kappa
-
             # Use best value to set the policy, agent by agent.
             # They can either persue rewards or info value,
             # but never both at the same time...
@@ -182,7 +174,7 @@ def run(config):
             # This is why
             # we call this library 'INFODUEL'
             meta = None
-            if last_reward >= (last_intrinsic - config.eta):
+            if last_rewards[i] >= (last_intrinsics[i] - config.eta):
                 meta_maddpg[a] = maddpg.agents[i]
                 meta = 0  # default reward greed
             else:
@@ -191,25 +183,30 @@ def run(config):
 
             # Log here so I don't need to keep track of these
             # last_* values
-            logger.add_scalar(f"{a}/policy", meta, ep_i)
-            logger.add_scalar(f"{a}/last_reward", last_reward, ep_i)
-            logger.add_scalar(f"{a}_intrinsic/last_intrinsic", last_intrinsic, ep_i)
+            logger.add_scalar(f"{a}/policy", meta, n)
+            logger.add_scalar(f"{a}/last_reward", last_rewards[i], n)
+            logger.add_scalar(f"{a}_intrinsic/last_intrinsic", last_intrinsics[i], n)
             logger.add_scalar(
                 f"{a}_intrinsic/last_intrinsic (adj)",
-                last_intrinsic - config.eta,
-                ep_i,
+                last_intrinsics[i] - config.eta,
+                n,
             )
-            logger.add_scalar(f"{a}_intrinsic/inspiration", inspiration, ep_i)
+            logger.add_scalar(f"{a}_intrinsic/inspiration", inspiration, n)
 
         # --- Rollout loop
         # (we go for a fixed length)
-        for et_i in range(config.episode_length):
+        for _ in range(config.episode_length):
             # If there are no agents the env
             # should be restarted.
             if len(env.agents) == 0:
                 obs = env.reset()
+                _ = academic.reset()
 
             # rearrange observations for maddpg
+            # TODO - cleanup gpu cast. put the policy on the
+            # gpu and leave it there. cast gpu as needed for
+            # step and train. also the below should be under
+            # a no_grad() context?
             torch_obs = [
                 torch.tensor(obs[a], requires_grad=False).unsqueeze(0)
                 for a in env.agents
@@ -224,119 +221,89 @@ def run(config):
                 agent_actions[a] = act
 
             # ...and apply these actions to the env
-            next_obs, _, dones, infos = env.step(agent_actions)
+            next_obs, rewards, dones, infos = env.step(agent_actions)
+            next_obs_in, intrinsics, dones_in, infos_in = academic.step(agent_actions)
 
-            # We wraaped the env in StatePrediction, a kind of
-            # acamemic wrapper that normally returns some user
-            # set mixture of intrinsic and rewards. However the
-            # 'infos' contains the pure reward and intrinsic so
-            # we extact and buffer them independently.
             replay_buffer.push(
                 [obs[a] for a in env.possible_agents],
                 [agent_actions[a] for a in env.possible_agents],
-                [infos[a]["env_reward"] for a in env.possible_agents],
+                [rewards[a] for a in env.possible_agents],
                 [next_obs[a] for a in env.possible_agents],
                 [dones[a] for a in env.possible_agents],
             )
             intrinsic_replay_buffer.push(
-                [obs[a] for a in env.possible_agents],
-                [agent_actions[a] for a in env.possible_agents],
-                [infos[a]["intrinsic_reward"] for a in env.possible_agents],
-                [next_obs[a] for a in env.possible_agents],
-                [dones[a] for a in env.possible_agents],
+                [obs[a] for a in academic.possible_agents],
+                [agent_actions[a] for a in academic.possible_agents],
+                [intrinsics[a] for a in academic.possible_agents],
+                [next_obs_in[a] for a in academic.possible_agents],
+                [dones_in[a] for a in academic.possible_agents],
             )
+
+            # sanity
+            for a in next_obs.keys():
+                assert np.allclose(
+                    next_obs[a], next_obs_in[a]
+                ), f"At step {n}, agent {a} next_obs disagreed between env and academic."
 
             # setup for next step
             obs = next_obs
-            t += config.n_rollout_threads
+            t += 1
 
-            # print("----------------------------")
-            # print("ei_i", et_i)
-            # print("obs.keys():", obs.keys())
-            # print("obs.shape:", list(obs.values())[0].shape)
-            # print("obs:", obs)
-            # print("torch_obs:", torch_obs)
-            # print("last_reward:", last_reward)
-            # print("last_intrinsic:", last_intrinsic)
-            # print("last_intrinsic (adj):", last_intrinsic - config.eta)
-            # print("meta_maddpg: ", meta_maddpg)
-            # print("agent_actions: ", agent_actions)
-            # print("env.possible_agents: ", env.possible_agents)
-            # print("env.agents: ", env.agents)
-            # print("rewards:", rewards)
-            # print("next_obs:", next_obs)
-            # print("infos", infos)
-            # print("dones:", dones)
-
-            # train (ugly code)
+            # --- Train (ugly code)?
             if (
                 len(replay_buffer) >= config.batch_size
-                and (t % config.steps_per_update) < config.n_rollout_threads
+                and (t % config.steps_per_update) == 1
             ):
-                # Reward
+                # reward
                 maddpg.prep_training(device=device)
-                for u_i in range(config.n_rollout_threads):
-                    for a_i, a_n in enumerate(env.possible_agents):
-                        sample = replay_buffer.sample(config.batch_size, device)
-                        maddpg.update(sample, a_i, a_n, logger=logger)
-                    maddpg.update_all_targets()
+                for i, a in enumerate(env.possible_agents):
+                    sample = replay_buffer.sample(config.batch_size, device)
+                    maddpg.update(sample, i, a, logger=logger)
+                maddpg.update_all_targets()
                 maddpg.prep_rollouts(device="cpu")
-                # Intrinsic
+                # info val
                 intrinsic_maddpg.prep_training(device=device)
-                for u_i in range(config.n_rollout_threads):
-                    for a_i, a_n in enumerate(env.possible_agents):
-                        sample = intrinsic_replay_buffer.sample(
-                            config.batch_size,
-                            device,
-                        )
-                        intrinsic_maddpg.update(
-                            sample, a_i, a_n + "_intrinsic", logger=logger
-                        )
-                    intrinsic_maddpg.update_all_targets()
+                for i, a in enumerate(academic.possible_agents):
+                    sample = intrinsic_replay_buffer.sample(config.batch_size, device)
+                    intrinsic_maddpg.update(sample, i, a, logger=logger)
+                intrinsic_maddpg.update_all_targets()
                 intrinsic_maddpg.prep_rollouts(device="cpu")
 
         # --- Post-episode LOG....
-        # Data
         # reward
-        ep_rews = replay_buffer.get_average_rewards(
-            config.episode_length * config.n_rollout_threads
-        )
         for i, a in enumerate(env.possible_agents):
             logger.add_scalar(
-                f"{a}/std_episode_actions", replay_buffer.ac_buffs[i].std(), ep_i
+                f"{a}/std_episode_actions", replay_buffer.ac_buffs[i].std(), n
             )
             logger.add_scalar(
-                f"{a}/std_episode_rewards", replay_buffer.rew_buffs[i].std(), ep_i
+                f"{a}/std_episode_rewards", replay_buffer.rew_buffs[i].std(), n
             )
-            logger.add_scalar(f"{a}/mean_episode_rewards", ep_rews[i], ep_i)
+            logger.add_scalar(f"{a}/mean_episode_rewards", last_rewards[i], n)
         # intrinsic
-        ep_intrins = intrinsic_replay_buffer.get_average_rewards(
-            config.episode_length * config.n_rollout_threads
-        )
         for i, a in enumerate(env.possible_agents):
             logger.add_scalar(
                 f"{a}_intrinsic/std_episode_actions",
                 intrinsic_replay_buffer.ac_buffs[i].std(),
-                ep_i,
+                n,
             )
             logger.add_scalar(
                 f"{a}_intrinsic/std_episode_intrinsic",
                 intrinsic_replay_buffer.rew_buffs[i].std(),
-                ep_i,
+                n,
             )
             logger.add_scalar(
-                f"{a}_intrinsic/mean_episode_intrinsic", ep_intrins[i], ep_i
+                f"{a}_intrinsic/mean_episode_intrinsic", last_intrinsics[i], n
             )
 
         # Models
-        if ep_i % config.save_interval < config.n_rollout_threads:
+        if n % config.save_interval == 1:
             os.makedirs(run_dir / "incremental", exist_ok=True)
             # reward
-            maddpg.save(run_dir / "incremental" / (f"model_ep{ep_i}.pt"))
+            maddpg.save(run_dir / "incremental" / (f"model_ep{n}.pt"))
             maddpg.save(run_dir / "model.pt")
             # intrinsic
             intrinsic_maddpg.save(
-                run_dir / "incremental" / (f"intrinsic_model_ep{ep_i}.pt")
+                run_dir / "incremental" / (f"intrinsic_model_ep{n}.pt")
             )
             intrinsic_maddpg.save(run_dir / "intrinsic_model.pt")
 
@@ -354,7 +321,6 @@ if __name__ == "__main__":
         "model_name", help="Name of directory to store " + "model/training contents"
     )
     parser.add_argument("--seed", default=1, type=int, help="Random seed")
-    parser.add_argument("--n_rollout_threads", default=1, type=int)
     parser.add_argument("--n_training_threads", default=6, type=int)
     parser.add_argument("--buffer_length", default=int(1e6), type=int)
     parser.add_argument("--n_episodes", default=25000, type=int)
@@ -363,14 +329,11 @@ if __name__ == "__main__":
     parser.add_argument(
         "--batch_size", default=1024, type=int, help="Batch size for model training"
     )
-    parser.add_argument("--n_exploration_eps", default=25000, type=int)
-    parser.add_argument("--init_noise_scale", default=0.3, type=float)
-    parser.add_argument("--final_noise_scale", default=0.0, type=float)
     parser.add_argument("--save_interval", default=1000, type=int)
     parser.add_argument("--hidden_dim", default=64, type=int)
     parser.add_argument("--lr", default=0.01, type=float)
     parser.add_argument("--tau", default=0.01, type=float)
-    parser.add_argument("--eta", default=0.001, type=float, help="Boredom parameter")
+    parser.add_argument("--eta", default=1.0, type=float, help="Boredom parameter")
     parser.add_argument(
         "--kappa",
         default=0.0,
