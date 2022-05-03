@@ -6,19 +6,19 @@ SHELL=/bin/bash -O expand_aliases
 # We set 'cuda:0' to default to a GPU but it will
 # get set to 'cpu' if needed
 test1:
-	python run_maddpg.py "simple_v2" "test1" --buffer_length=2500 --device="cuda:0"
+	python run_maddpg.py "simple_v2" "test1" --device="cuda:0"
 
 test2:
-	python run_maddpg.py "simple_tag_v2" "test2" --buffer_length=2500 --device="cuda:0"
+	python run_maddpg.py "simple_tag_v2" "test2" --device="cuda:0"
 
 test3:
-	python run_infoduel_maddpg.py "simple_v2" "test3" --eta=0.002 --buffer_length=2500 --device="cuda:0"
+	python run_infoduel_maddpg.py "simple_v2" "test3" --eta=1.0 --device="cuda:0"
 
 test4:
-	python run_infoduel_maddpg.py "simple_tag_v2" "test4" --eta=0.002 --buffer_length=2500 --device="cuda:0"
+	python run_infoduel_maddpg.py "simple_tag_v2" "test4" --eta=1.0 --device="cuda:0"
 
 test5:
-	python run_infoduel_maddpg.py "simple_tag_v2" "test5" --eta=0.002 --kappa=1.0 --buffer_length=2500 --device="cuda:0"
+	python run_infoduel_maddpg.py "simple_tag_v2" "test5" --eta=1.0 --kappa=1.0  --device="cuda:0"
 
 
 # -------------------------------------------------------------------------
@@ -63,6 +63,7 @@ exp2k:
 
 # ----
 # c) simple_crypto_v2 (Covert communication)
+# RESULTS: nan on action selection. TODO - debug
 # maddpg
 exp3m: 
 	parallel -j 1 --colsep , --delay 10 --joblog=models/exp3m.parallel.log --header : python run_maddpg.py '"simple_crypto_v2" "exp3m_lr{lr}" --buffer_length=2500 --device="cuda:0" --seed={seed} --lr={lr}' ::: seed 40 103 59 ::: lr 0.01 
