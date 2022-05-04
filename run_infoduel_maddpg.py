@@ -215,7 +215,7 @@ def run(config):
 
             # rearrange observations for maddpg
             torch_obs = [
-                torch.tensor(obs[a], requires_grad=False).to(th_device).unsqueeze(0)s
+                torch.tensor(obs[a], requires_grad=False).to(th_device).unsqueeze(0)
                 for a in env.agents
             ]
 
