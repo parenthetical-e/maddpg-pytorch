@@ -224,7 +224,7 @@ def run(config):
             agent_actions = {}
             for i, a in enumerate(env.possible_agents):
                 act = meta_maddpg[a].step(torch_obs[i], explore=False)
-                act = act.data.cpu()numpy().flatten()
+                act = act.data.cpu().numpy().flatten()
                 agent_actions[a] = act
 
             # ...and apply these actions to the env
