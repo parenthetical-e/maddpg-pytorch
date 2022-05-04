@@ -22,7 +22,6 @@ import torch.nn as nn
 
 from stable_baselines3.common.vec_env.base_vec_env import VecEnvWrapper
 from stable_baselines3.common.vec_env.base_vec_env import VecEnv
-from stable_baselines3.common.utils import get_device
 
 from dualer.common import create_mlp
 from dualer.common import FrozenConv
@@ -54,7 +53,7 @@ class StatePredictionWrapper(gym.Wrapper):
         self.reward_weight = reward_weight
         self.reset_networks = reset_networks
         self.mode = mode
-        self.device = get_device(device)
+        self.device = torch.device(device)
 
         # Init net
         self.lr = float(lr)

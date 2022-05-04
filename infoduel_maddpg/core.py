@@ -27,6 +27,7 @@ class MADDPG(object):
         lr=0.01,
         hidden_dim=64,
         discrete_action=False,
+        device="cpu",
     ):
         """
         Inputs:
@@ -56,11 +57,21 @@ class MADDPG(object):
         self.tau = tau
         self.lr = lr
         self.discrete_action = discrete_action
-        self.pol_dev = "cpu"  # device for policies
-        self.critic_dev = "cpu"  # device for critics
-        self.trgt_pol_dev = "cpu"  # device for target policies
-        self.trgt_critic_dev = "cpu"  # device for target critics
+        # self.pol_dev = "cpu"  # device for policies
+        # self.critic_dev = "cpu"  # device for critics
+        # self.trgt_pol_dev = "cpu"  # device for target policies
+        # self.trgt_critic_dev = "cpu"  # device for target critics
         self.niter = 0
+        self.to(device)
+
+    def to(self, device):
+        """Set all nn.Module to the device"""
+        device = torch.device(device)
+        for a in self.agents:
+            a.policy.to(device)
+            a.critic.to(device)
+            a.target_policy.to(device)
+            a.target_critic.to(device)
 
     @property
     def policies(self):
@@ -205,12 +216,12 @@ class MADDPG(object):
             soft_update(a.target_policy, a.policy, self.tau)
         self.niter += 1
 
-    def prep_training(self, device="cpu"):
-        for a in self.agents:
-            a.policy.to(device)
-            a.critic.to(device)
-            a.target_policy.to(device)
-            a.target_critic.to(device)
+    def prep_training(self):
+        # for a in self.agents:
+        #     a.policy.to(device)
+        #     a.critic.to(device)
+        #     a.target_policy.to(device)
+        #     a.target_critic.to(device)
         for a in self.agents:
             a.policy.train()
             a.critic.train()
@@ -237,9 +248,9 @@ class MADDPG(object):
         #         a.target_critic = fn(a.target_critic)
         #     self.trgt_critic_dev = device
 
-    def prep_rollouts(self, device="cpu"):
-        for a in self.agents:
-            a.policy.to(device)
+    def prep_rollouts(self):
+        # for a in self.agents:
+        #     a.policy.to(device)
         for a in self.agents:
             a.policy.eval()
         # if device == "gpu":
@@ -256,7 +267,7 @@ class MADDPG(object):
         """
         Save trained parameters of all agents into one file
         """
-        self.prep_training(device="cpu")  # move parameters to CPU before saving
+        # self.prep_training(device="cpu")  # move parameters to CPU before saving
         save_dict = {
             "init_dict": self.init_dict,
             "agent_params": [a.get_params() for a in self.agents],
@@ -273,6 +284,7 @@ class MADDPG(object):
         tau=0.01,
         lr=0.01,
         hidden_dim=64,
+        device="cpu",
     ):
         """
         Instantiate instance of this class from multi-agent environment
@@ -320,10 +332,11 @@ class MADDPG(object):
         }
         instance = cls(**init_dict)
         instance.init_dict = init_dict
+        instance.to(device)
         return instance
 
     @classmethod
-    def init_from_save(cls, filename):
+    def init_from_save(cls, filename, device="cpu"):
         """
         Instantiate instance of this class from file created by 'save' method
         """
@@ -332,4 +345,5 @@ class MADDPG(object):
         instance.init_dict = save_dict["init_dict"]
         for a, params in zip(instance.agents, save_dict["agent_params"]):
             a.load_params(params)
+        instance.to(device)  # cast
         return instance

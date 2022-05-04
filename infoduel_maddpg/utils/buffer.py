@@ -1,4 +1,5 @@
 import numpy as np
+import torch
 from torch import Tensor
 from torch.autograd import Variable
 
@@ -83,6 +84,7 @@ class ReplayBuffer(object):
             self.curr_i = 0
 
     def sample(self, N, device, norm_rews=True):
+        device = torch.device(device)
         inds = np.random.choice(np.arange(self.filled_i), size=N, replace=False)
         cast = lambda x: Variable(Tensor(x), requires_grad=False).to(device)
         if norm_rews:

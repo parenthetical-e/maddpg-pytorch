@@ -12,7 +12,8 @@ from infoduel_maddpg.utils.buffer import ReplayBuffer
 from infoduel_maddpg.core import MADDPG
 
 from stable_baselines3.common.vec_env import SubprocVecEnv, DummyVecEnv
-from stable_baselines3.common.utils import get_device
+
+# from stable_baselines3.common.utils import get_device
 
 from pettingzoo import mpe
 from supersuit import stable_baselines3_vec_env_v0
@@ -30,8 +31,7 @@ def run(config):
     torch.manual_seed(config.seed)
     np.random.seed(config.seed)
 
-    device = get_device(config.device)
-    if device == "cpu":
+    if config.device == "cpu":
         torch.set_num_threads(config.n_training_threads)
 
     # --- Setup log paths.
@@ -60,8 +60,11 @@ def run(config):
     logger = SummaryWriter(str(log_dir))
 
     print(f"----- Running: {config.env_id} ------")
-    print(f"device: {device}")
+    print(f"device: {config.device}")
     print(f"log_dir: {log_dir}")
+
+    # Set
+    th_device = torch.device(config.device)
 
     # --- Build the envs, an MPE zoo
     Env = getattr(mpe, config.env_id)
@@ -74,7 +77,7 @@ def run(config):
         academic,
         network_hidden=[config.hidden_dim],
         lr=config.lr / 10,
-        device=device,
+        device=config.device,
     )
     # Fold-change
     env = MovingFoldChangeRewardWrapper(
@@ -108,6 +111,7 @@ def run(config):
         tau=config.tau,
         lr=config.lr,
         hidden_dim=config.hidden_dim,
+        device=config.device,
     )
     intrinsic_maddpg = MADDPG.init_from_env(
         academic,
@@ -116,6 +120,7 @@ def run(config):
         tau=config.tau,
         lr=config.lr,
         hidden_dim=config.hidden_dim,
+        device=config.device,
     )
     replay_buffer = ReplayBuffer(
         config.buffer_length,
@@ -139,8 +144,8 @@ def run(config):
         obs = env.reset()
         _ = academic.reset()
 
-        maddpg.prep_rollouts(device="cpu")
-        intrinsic_maddpg.prep_rollouts(device="cpu")
+        maddpg.prep_rollouts()
+        intrinsic_maddpg.prep_rollouts()
 
         # --- Use curious inspiration? (aka parkid)
         inspiration = 0.0
@@ -209,12 +214,8 @@ def run(config):
                 _ = academic.reset()
 
             # rearrange observations for maddpg
-            # TODO - cleanup gpu cast. put the policy on the
-            # gpu and leave it there. cast gpu as needed for
-            # step and train. also the below should be under
-            # a no_grad() context?
             torch_obs = [
-                torch.tensor(obs[a], requires_grad=False).unsqueeze(0)
+                torch.tensor(obs[a], requires_grad=False).to(th_device).unsqueeze(0)s
                 for a in env.agents
             ]
 
@@ -261,19 +262,21 @@ def run(config):
                 and (t % config.steps_per_update) == 1
             ):
                 # reward
-                maddpg.prep_training(device=device)
+                maddpg.prep_training()
                 for i, a in enumerate(env.possible_agents):
-                    sample = replay_buffer.sample(config.batch_size, device)
+                    sample = replay_buffer.sample(config.batch_size, config.device)
                     maddpg.update(sample, i, a, logger=logger)
                 maddpg.update_all_targets()
-                maddpg.prep_rollouts(device="cpu")
+                maddpg.prep_rollouts()
                 # info val
-                intrinsic_maddpg.prep_training(device=device)
+                intrinsic_maddpg.prep_training()
                 for i, a in enumerate(academic.possible_agents):
-                    sample = intrinsic_replay_buffer.sample(config.batch_size, device)
+                    sample = intrinsic_replay_buffer.sample(
+                        config.batch_size, config.device
+                    )
                     intrinsic_maddpg.update(sample, i, a, logger=logger)
                 intrinsic_maddpg.update_all_targets()
-                intrinsic_maddpg.prep_rollouts(device="cpu")
+                intrinsic_maddpg.prep_rollouts()
 
         # --- Post-episode LOG....
         # reward
