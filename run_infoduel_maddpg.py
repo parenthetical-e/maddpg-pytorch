@@ -31,8 +31,8 @@ def run(config):
     torch.manual_seed(config.seed)
     np.random.seed(config.seed)
 
-    if config.device == "cpu":
-        torch.set_num_threads(config.n_training_threads)
+    # if config.device == "cpu":
+    #     torch.set_num_threads(config.n_training_threads)
 
     # --- Setup log paths.
     #
@@ -330,7 +330,7 @@ if __name__ == "__main__":
         "model_name", help="Name of directory to store " + "model/training contents"
     )
     parser.add_argument("--seed", default=1, type=int, help="Random seed")
-    parser.add_argument("--n_training_threads", default=6, type=int)
+    # parser.add_argument("--n_training_threads", default=6, type=int)
     parser.add_argument("--buffer_length", default=25000, type=int)
     parser.add_argument("--n_episodes", default=25000, type=int)
     parser.add_argument("--episode_length", default=25, type=int)
