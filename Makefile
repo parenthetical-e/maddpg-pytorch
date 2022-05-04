@@ -3,13 +3,13 @@ SHELL=/bin/bash -O expand_aliases
 # -------------------------------------------------------------------------
 # Some basic function tests for two easy tasks.
 #
-# We set 'cuda:0' to default to a GPU but it will
+# We set 'cpu' to default to a GPU but it will
 # get set to 'cpu' if needed
 test1:
-	python run_maddpg.py "simple_v2" "test1" --n_episodes=5000 --device="cuda:0"
+	python run_maddpg.py "simple_v2" "test1" --n_episodes=5000 --device="cpu"
 
 test2:
-	python run_maddpg.py "simple_tag_v2" "test2" --device="cuda:0"
+	python run_maddpg.py "simple_tag_v2" "test2" --device="cpu"
 
 test3:
 	python run_infoduel_maddpg.py "simple_v2" "test3" --n_episodes=5000 --eta=0.0 --device="cpu"
@@ -18,7 +18,7 @@ test4:
 	python run_infoduel_maddpg.py "simple_tag_v2" "test4" --eta=1.0 --device="cpu"
 
 test5:
-	python run_infoduel_maddpg.py "simple_tag_v2" "test5" --eta=1.0 --kappa=1.0  --device="cuda:0"
+	python run_infoduel_maddpg.py "simple_tag_v2" "test5" --eta=1.0 --kappa=1.0  --device="cpu"
 
 
 # -------------------------------------------------------------------------
@@ -42,7 +42,7 @@ test5:
 # ----
 # a) simple_v2 (one agent, no parkid)
 exp1m: 
-	parallel -j 1 --colsep , --delay 10 --joblog=models/exp1m.parallel.log --header : python run_maddpg.py '"simple_v2" "exp1m_lr{lr}" --buffer_length=2500 --device="cuda:0" --seed={seed} --lr={lr}' ::: seed 40 103 59 ::: lr 0.01 
+	parallel -j 1 --colsep , --delay 10 --joblog=models/exp1m.parallel.log --header : python run_maddpg.py '"simple_v2" "exp1m_lr{lr}" --buffer_length=2500 --device="cpu" --seed={seed} --lr={lr}' ::: seed 40 103 59 ::: lr 0.01 
 
 exp1d: 
 	parallel -j 1 --colsep , --delay 10 --joblog=models/exp1d.parallel.log --header : python run_infoduel_maddpg.py '"simple_v2" "exp1d_lr{lr}_eta{eta}" --buffer_length=2500 --device="cuda:1" --seed={seed} --lr={lr} --eta={eta}' ::: seed 40 103 59 ::: lr 0.01  ::: eta 0.0020 0.0025 0.00275 0.003
@@ -51,7 +51,7 @@ exp1d:
 # b) simple_adversary_v2 (Physical deception)
 # maddpg
 exp2m: 
-	parallel -j 1 --colsep , --delay 10 --joblog=models/exp2m.parallel.log --header : python run_maddpg.py '"simple_adversary_v2" "exp2m_lr{lr}" --buffer_length=2500 --device="cuda:0" --seed={seed} --lr={lr}' ::: seed 40 103 59 ::: lr 0.01 
+	parallel -j 1 --colsep , --delay 10 --joblog=models/exp2m.parallel.log --header : python run_maddpg.py '"simple_adversary_v2" "exp2m_lr{lr}" --buffer_length=2500 --device="cpu" --seed={seed} --lr={lr}' ::: seed 40 103 59 ::: lr 0.01 
 
 # infoduel-maddpg
 exp2d: 
@@ -66,7 +66,7 @@ exp2k:
 # RESULTS: nan on action selection. TODO - debug
 # maddpg
 exp3m: 
-	parallel -j 1 --colsep , --delay 10 --joblog=models/exp3m.parallel.log --header : python run_maddpg.py '"simple_crypto_v2" "exp3m_lr{lr}" --buffer_length=2500 --device="cuda:0" --seed={seed} --lr={lr}' ::: seed 40 103 59 ::: lr 0.01 
+	parallel -j 1 --colsep , --delay 10 --joblog=models/exp3m.parallel.log --header : python run_maddpg.py '"simple_crypto_v2" "exp3m_lr{lr}" --buffer_length=2500 --device="cpu" --seed={seed} --lr={lr}' ::: seed 40 103 59 ::: lr 0.01 
 
 # infoduel-maddpg
 exp3d: 
@@ -81,7 +81,7 @@ exp3k:
 # d) simple_push_v2 (Keep-away)
 # maddpg
 exp4m: 
-	parallel -j 1 --colsep , --delay 10 --joblog=models/exp4m.parallel.log --header : python run_maddpg.py '"simple_push_v2" "exp4m_lr{lr}" --buffer_length=2500 --device="cuda:0" --seed={seed} --lr={lr}' ::: seed 40 103 59 ::: lr 0.01 
+	parallel -j 1 --colsep , --delay 10 --joblog=models/exp4m.parallel.log --header : python run_maddpg.py '"simple_push_v2" "exp4m_lr{lr}" --buffer_length=2500 --device="cpu" --seed={seed} --lr={lr}' ::: seed 40 103 59 ::: lr 0.01 
 
 # infoduel-maddpg
 exp4d: 
@@ -95,7 +95,7 @@ exp4k:
 # e) simple_reference_v2 (other agent location coop communication)
 # maddpg
 exp5m: 
-	parallel -j 1 --colsep , --delay 10 --joblog=models/exp5m.parallel.log --header : python run_maddpg.py '"simple_reference_v2" "exp5m_lr{lr}" --buffer_length=2500 --device="cuda:0" --seed={seed} --lr={lr}' ::: seed 40 103 59 ::: lr 0.01 
+	parallel -j 1 --colsep , --delay 10 --joblog=models/exp5m.parallel.log --header : python run_maddpg.py '"simple_reference_v2" "exp5m_lr{lr}" --buffer_length=2500 --device="cpu" --seed={seed} --lr={lr}' ::: seed 40 103 59 ::: lr 0.01 
 
 # infoduel-maddpg
 exp5d: 
@@ -109,7 +109,7 @@ exp5k:
 # f) simple_speaker_listener_v3 (Cooperative communication)
 # maddpg
 exp6m: 
-	parallel -j 1 --colsep , --delay 10 --joblog=models/exp6m.parallel.log --header : python run_maddpg.py '"simple_speaker_listener_v3" "exp6m_lr{lr}" --buffer_length=2500 --device="cuda:0" --seed={seed} --lr={lr}' ::: seed 40 103 59 ::: lr 0.01 
+	parallel -j 1 --colsep , --delay 10 --joblog=models/exp6m.parallel.log --header : python run_maddpg.py '"simple_speaker_listener_v3" "exp6m_lr{lr}" --buffer_length=2500 --device="cpu" --seed={seed} --lr={lr}' ::: seed 40 103 59 ::: lr 0.01 
 
 # infoduel-maddpg
 exp6d: 
@@ -124,7 +124,7 @@ exp6k:
 # g) simple_spread_v2 (Cooperative navigation)
 # maddpg
 exp7m: 
-	parallel -j 1 --colsep , --delay 10 --joblog=models/exp7m.parallel.log --header : python run_maddpg.py '"simple_spread_v2" "exp7m_lr{lr}" --buffer_length=2500 --device="cuda:0" --seed={seed} --lr={lr}' ::: seed 40 103 59 ::: lr 0.01 
+	parallel -j 1 --colsep , --delay 10 --joblog=models/exp7m.parallel.log --header : python run_maddpg.py '"simple_spread_v2" "exp7m_lr{lr}" --buffer_length=2500 --device="cpu" --seed={seed} --lr={lr}' ::: seed 40 103 59 ::: lr 0.01 
 
 # infoduel-maddpg
 exp7d: 
@@ -138,7 +138,7 @@ exp7k:
 # h) simple_tag_v2 (Predator-prey)
 # maddpg
 exp8m: 
-	parallel -j 1 --colsep , --delay 10 --joblog=models/exp8m.parallel.log --header : python run_maddpg.py '"simple_tag_v2" "exp8m_lr{lr}" --buffer_length=2500 --device="cuda:0" --seed={seed} --lr={lr}' ::: seed 40 103 59 ::: lr 0.01 
+	parallel -j 1 --colsep , --delay 10 --joblog=models/exp8m.parallel.log --header : python run_maddpg.py '"simple_tag_v2" "exp8m_lr{lr}" --buffer_length=2500 --device="cpu" --seed={seed} --lr={lr}' ::: seed 40 103 59 ::: lr 0.01 
 
 # infoduel-maddpg
 exp8d: 
@@ -152,7 +152,7 @@ exp8k:
 # i) simple_world_comm_v2 (more complex Predator-prey)
 # maddpg
 exp9m: 
-	parallel -j 1 --colsep , --delay 10 --joblog=models/exp9m.parallel.log --header : python run_maddpg.py '"simple_world_comm_v2" "exp9m_lr{lr}" --buffer_length=2500 --device="cuda:0" --seed={seed} --lr={lr}' ::: seed 40 103 59 ::: lr 0.01 
+	parallel -j 1 --colsep , --delay 10 --joblog=models/exp9m.parallel.log --header : python run_maddpg.py '"simple_world_comm_v2" "exp9m_lr{lr}" --buffer_length=2500 --device="cpu" --seed={seed} --lr={lr}' ::: seed 40 103 59 ::: lr 0.01 
 
 # infoduel-maddpg
 exp9d: 
