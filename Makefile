@@ -6,16 +6,16 @@ SHELL=/bin/bash -O expand_aliases
 # We set 'cuda:0' to default to a GPU but it will
 # get set to 'cpu' if needed
 test1:
-	python run_maddpg.py "simple_v2" "test1" --device="cuda:0"
+	python run_maddpg.py "simple_v2" "test1" --n_episodes=5000 --device="cuda:0"
 
 test2:
 	python run_maddpg.py "simple_tag_v2" "test2" --device="cuda:0"
 
 test3:
-	python run_infoduel_maddpg.py "simple_v2" "test3" --eta=1.0 --device="cuda:0"
+	python run_infoduel_maddpg.py "simple_v2" "test3" --n_episodes=5000 --eta=0.0 --device="cpu"
 
 test4:
-	python run_infoduel_maddpg.py "simple_tag_v2" "test4" --eta=1.0 --device="cuda:0"
+	python run_infoduel_maddpg.py "simple_tag_v2" "test4" --eta=1.0 --device="cpu"
 
 test5:
 	python run_infoduel_maddpg.py "simple_tag_v2" "test5" --eta=1.0 --kappa=1.0  --device="cuda:0"
