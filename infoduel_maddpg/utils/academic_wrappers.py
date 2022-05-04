@@ -43,7 +43,7 @@ class StatePredictionWrapper(gym.Wrapper):
         mode="memory",  # optional
         lr=0.01,
         network_hidden=None,
-        device="auto",
+        device="cpu",
     ):
         # Init gym
         super().__init__(env)
