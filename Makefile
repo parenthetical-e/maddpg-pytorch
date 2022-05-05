@@ -9,7 +9,7 @@ test1:
 	python run_maddpg.py "simple_v2" "test1" --n_episodes=5000 --device="cpu"
 
 test2:
-	python run_maddpg.py "simple_tag_v2" "test2" --device="cpu"
+	python run_maddpg.py "simple_tag_v2" "test2" --device="cpu" 
 
 test3:
 	python run_infoduel_maddpg.py "simple_v2" "test3" --n_episodes=5000 --eta=0.0 --device="cpu"
