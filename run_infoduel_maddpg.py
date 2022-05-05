@@ -147,15 +147,6 @@ def run(config):
         maddpg.prep_rollouts()
         intrinsic_maddpg.prep_rollouts()
 
-        # --- Use curious inspiration? (aka parkid)
-        inspiration = 0.0
-        if config.kappa > 0:
-            for i, a in enumerate(env.possible_agents):
-                inspiration += (
-                    intrinsic_replay_buffer.get_max_rewards(config.episode_length)
-                    - config.eta
-                )
-
         # --- Do the INFODUEL!
         # Set the policy on a per episode basis for a little more
         # stability then on every step. This is violation of out
@@ -170,6 +161,12 @@ def run(config):
             last_intrinsics = intrinsic_replay_buffer.get_max_rewards(
                 config.episode_length
             )
+
+        # --- Use curious inspiration? (aka parkid)
+        inspiration = 0.0
+        if config.kappa > 0:
+            inspiration = np.sum(np.asarray(last_intrinsics) - config.eta)
+            inspiration *= config.kappa
 
         meta_maddpg = {}
         for i, a in enumerate(env.possible_agents):
